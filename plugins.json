@@ -1,10 +1,10 @@
 {
   "version": "1.0.0",
-  "last_updated": "2025-08-15T13:26:00Z",
+  "last_updated": "2025-08-15T13:31:00Z",
   "plugins": [
     {
       "id": "novelfull",
-      "name": "NovelFull",
+      "name": "NovelFull", 
       "version": "1.0.0",
       "description": "Read novels from NovelFull.net",
       "author": "khairil4565",
