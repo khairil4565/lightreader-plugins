@@ -47,12 +47,12 @@ class NovelFullPlugin extends BasePlugin {
 
     parseNovelList(html, queryType) {
         try {
-            // Use native parseHTML function instead of DOMParser
             let selector = '.list.list-truyen .row';
             if (queryType === 'search') {
                 selector = '.list-truyen .row';
             }
             
+            console.log(`Using selector: ${selector}`);
             const novelElements = parseHTML(html, selector);
             console.log(`Found ${novelElements.length} novel elements`);
             
@@ -62,26 +62,39 @@ class NovelFullPlugin extends BasePlugin {
                 const element = novelElements[i];
                 
                 try {
-                    // Get title and URL from the element's HTML
-                    const titleElements = parseHTML(element.html, '.truyen-title a, h3 a');
-                    if (titleElements.length === 0) continue;
-                    
-                    const titleElement = titleElements[0];
-                    const title = titleElement.text.trim();
-                    const novelURL = this.resolveURL(titleElement.href);
-                    
-                    // Get cover image
-                    const coverElements = parseHTML(element.html, '.book img');
-                    let coverURL = null;
-                    if (coverElements.length > 0) {
-                        const coverElement = coverElements;
-                        coverURL = coverElement['data-src'] || coverElement.src;
-                        coverURL = this.resolveURL(coverURL);
+                    // Get title and URL - with defensive checks
+                    const titleElements = parseHTML(element.html, '.truyen-title a, h3 a, a');
+                    if (titleElements.length === 0) {
+                        console.log(`No title found in element ${i}`);
+                        continue;
                     }
                     
-                    // Get author
+                    const titleElement = titleElements[0];
+                    const title = titleElement.text ? titleElement.text.trim() : '';
+                    const novelURL = this.resolveURL(titleElement.href);
+                    
+                    if (!title || !novelURL) {
+                        console.log(`Skipping element ${i}: title="${title}", url="${novelURL}"`);
+                        continue;
+                    }
+                    
+                    // Get cover image - with defensive checks
+                    const coverElements = parseHTML(element.html, '.book img, img');
+                    let coverURL = null;
+                    if (coverElements.length > 0 && coverElements) {
+                        const coverElement = coverElements;
+                        coverURL = coverElement['data-src'] || coverElement.src;
+                        if (coverURL) {
+                            coverURL = this.resolveURL(coverURL);
+                        }
+                    }
+                    
+                    // Get author - with defensive checks
                     const authorElements = parseHTML(element.html, '.author');
-                    const author = authorElements.length > 0 ? authorElements.text.trim() : null;
+                    let author = null;
+                    if (authorElements.length > 0 && authorElements && authorElements.text) {
+                        author = authorElements.text.trim();
+                    }
                     
                     const novel = {
                         id: `novelfull_${Date.now()}_${i}`,
@@ -94,9 +107,10 @@ class NovelFullPlugin extends BasePlugin {
                     };
                     
                     novels.push(novel);
+                    console.log(`Added novel: ${title} by ${author || 'Unknown'}`);
                     
                 } catch (error) {
-                    console.log(`Error parsing novel element: ${error}`);
+                    console.log(`Error parsing novel element ${i}: ${error}`);
                 }
             }
             
@@ -122,22 +136,24 @@ class NovelFullPlugin extends BasePlugin {
             console.log(`Fetching novel details from: ${novelURL}`);
             const html = await fetch(novelURL);
             
-            // Parse using native parseHTML function
-            const titleElements = parseHTML(html, 'h3.title');
-            const title = titleElements.length > 0 ? titleElements[0].text.trim() : 'Unknown Title';
+            // Parse using parseHTML bridge with defensive checks
+            const titleElements = parseHTML(html, 'h3.title, .title, h1');
+            const title = (titleElements.length > 0 && titleElements[0].text) ? titleElements.text.trim() : 'Unknown Title';
             
-            const authorElements = parseHTML(html, '.info a[href*="author"]');
-            const author = authorElements.length > 0 ? authorElements.text.trim() : null;
+            const authorElements = parseHTML(html, '.info a[href*="author"], .author');
+            const author = (authorElements.length > 0 && authorElements.text) ? authorElements.text.trim() : null;
             
-            const synopsisElements = parseHTML(html, '.desc-text');
-            const synopsis = synopsisElements.length > 0 ? synopsisElements.text.trim() : null;
+            const synopsisElements = parseHTML(html, '.desc-text, .desc, .description');
+            const synopsis = (synopsisElements.length > 0 && synopsisElements.text) ? synopsisElements.text.trim() : null;
             
-            const coverElements = parseHTML(html, '.book img');
+            const coverElements = parseHTML(html, '.book img, .cover img, img');
             let coverURL = null;
-            if (coverElements.length > 0) {
+            if (coverElements.length > 0 && coverElements) {
                 const coverElement = coverElements;
                 coverURL = coverElement['data-src'] || coverElement.src;
-                coverURL = this.resolveURL(coverURL);
+                if (coverURL) {
+                    coverURL = this.resolveURL(coverURL);
+                }
             }
             
             // Parse chapters
@@ -168,14 +184,16 @@ class NovelFullPlugin extends BasePlugin {
 
     parseChapterList(html, novelURL) {
         const chapters = [];
-        const chapterElements = parseHTML(html, '#list-chapter .row a');
+        const chapterElements = parseHTML(html, '#list-chapter .row a, .chapter-list a, .list-chapter a');
         
         for (let i = 0; i < chapterElements.length; i++) {
             const element = chapterElements[i];
             
             try {
-                const chapterTitle = element.text.trim();
+                const chapterTitle = (element.text) ? element.text.trim() : `Chapter ${i + 1}`;
                 const chapterURL = this.resolveURL(element.href);
+                
+                if (!chapterURL) continue;
                 
                 let chapterNumber = i + 1;
                 const numberMatch = chapterTitle.match(/\d+/);
@@ -196,7 +214,7 @@ class NovelFullPlugin extends BasePlugin {
                 chapters.push(chapter);
                 
             } catch (error) {
-                console.log(`Error parsing chapter: ${error}`);
+                console.log(`Error parsing chapter ${i}: ${error}`);
             }
         }
         
@@ -214,8 +232,8 @@ class NovelFullPlugin extends BasePlugin {
             
             for (const selector of contentSelectors) {
                 const contentElements = parseHTML(html, selector);
-                if (contentElements.length > 0) {
-                    const content = contentElements[0].text.trim();
+                if (contentElements.length > 0 && contentElements[0].text) {
+                    const content = contentElements.text.trim();
                     
                     if (content.length > 100) {
                         console.log(`Successfully fetched chapter content (${content.length} characters)`);
@@ -224,7 +242,19 @@ class NovelFullPlugin extends BasePlugin {
                 }
             }
             
-            return 'Chapter content could not be loaded';
+            // Fallback to paragraphs
+            const paragraphs = parseHTML(html, 'p');
+            let content = '';
+            for (const p of paragraphs) {
+                if (p.text) {
+                    const text = p.text.trim();
+                    if (text.length > 50) {
+                        content += text + '\n\n';
+                    }
+                }
+            }
+            
+            return content || 'Chapter content could not be loaded';
             
         } catch (error) {
             console.log(`Error fetching chapter content: ${error}`);
