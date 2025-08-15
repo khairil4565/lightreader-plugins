@@ -12,37 +12,50 @@ class NovelFullPlugin extends BasePlugin {
     }
 
     async searchNovels(query) {
-        // Placeholder implementation
-        return [{
-            id: 'sample-novel',
-            title: 'Sample Novel',
-            author: 'Sample Author',
-            synopsis: 'This is a sample novel',
-            coverImageURL: null,
-            sourcePlugin: this.id,
-            novelURL: 'https://novelfull.net/sample'
-        }];
+        console.log(`Searching for: ${query}`);
+        
+        // Sample return data for testing
+        return [
+            {
+                id: 'sample-novel-1',
+                title: 'Sample Fantasy Novel',
+                author: 'Test Author',
+                synopsis: 'An epic fantasy adventure...',
+                coverImageURL: null,
+                sourcePlugin: this.id,
+                novelURL: 'https://novelfull.net/sample-novel-1'
+            }
+        ];
     }
 
     async fetchNovelDetails(novelURL) {
-        // Placeholder implementation
         return {
             novel: {
-                id: 'sample-novel',
-                title: 'Sample Novel',
-                author: 'Sample Author',
-                synopsis: 'Sample synopsis',
+                id: 'sample-novel-1',
+                title: 'Sample Fantasy Novel',
+                author: 'Test Author',
+                synopsis: 'Full synopsis of the epic fantasy adventure story...',
                 coverImageURL: null,
                 sourcePlugin: this.id,
                 novelURL: novelURL
             },
-            chapters: [],
-            totalChapters: 0,
+            chapters: [
+                {
+                    id: 'chapter-1',
+                    title: 'Chapter 1: The Beginning',
+                    novelId: 'sample-novel-1',
+                    chapterNumber: 1,
+                    url: 'https://novelfull.net/sample-novel-1/chapter-1',
+                    content: null,
+                    isDownloaded: false
+                }
+            ],
+            totalChapters: 1,
             lastUpdated: new Date()
         };
     }
 
     async fetchChapterContent(chapterURL) {
-        return "Sample chapter content";
+        return "This is sample chapter content for testing purposes.";
     }
 }
