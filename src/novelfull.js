@@ -222,16 +222,41 @@ class NovelFullPlugin extends BasePlugin {
             const firstPageChapters = this.parseChapterList(firstPageHtml, novelURL);
             allChapters = allChapters.concat(firstPageChapters);
             
-            // Check if there are more pages by looking for pagination
-            const totalPagesElements = parseHTML(firstPageHtml, '#total-page');
+            // Check for pagination by looking for pagination links
+            const paginationElements = parseHTML(firstPageHtml, '.pagination .last a, .pagination .next:not(.disabled) a');
             let totalPages = 1;
             
-            if (totalPagesElements && totalPagesElements.length > 0) {
-                const totalPagesValue = totalPagesElements[0].value;
-                if (totalPagesValue) {
-                    totalPages = parseInt(totalPagesValue) || 1;
+            // Try to find the last page number from pagination
+            if (paginationElements && paginationElements.length > 0) {
+                for (const element of paginationElements) {
+                    if (element.text && element.text.includes('Last')) {
+                        // Extract page number from Last link
+                        const lastPageMatch = element.href.match(/page=(\d+)/);
+                        if (lastPageMatch) {
+                            totalPages = parseInt(lastPageMatch[1]);
+                            break;
+                        }
+                    }
                 }
             }
+            
+            // Alternative: look for page links with numbers
+            if (totalPages === 1) {
+                const pageNumberElements = parseHTML(firstPageHtml, '.pagination a[data-page]');
+                let maxPage = 1;
+                
+                if (pageNumberElements && pageNumberElements.length > 0) {
+                    for (const element of pageNumberElements) {
+                        const pageNum = parseInt(element['data-page']) + 1; // data-page is 0-indexed
+                        if (pageNum > maxPage) {
+                            maxPage = pageNum;
+                        }
+                    }
+                    totalPages = maxPage;
+                }
+            }
+            
+            console.log(`Detected ${totalPages} total pages of chapters`);
             
             // If there's only 1 page, return what we have
             if (totalPages <= 1) {
@@ -239,10 +264,8 @@ class NovelFullPlugin extends BasePlugin {
                 return allChapters;
             }
             
-            console.log(`Found ${totalPages} total pages of chapters`);
-            
             // Fetch chapters from remaining pages (limit to prevent too many requests)
-            const maxPagesToFetch = Math.min(totalPages, 20); // Limit to 20 pages max
+            const maxPagesToFetch = Math.min(totalPages, 25); // Increased limit to 25 pages
             
             for (let page = 2; page <= maxPagesToFetch; page++) {
                 try {
@@ -254,12 +277,18 @@ class NovelFullPlugin extends BasePlugin {
                     
                     // Parse chapters from this page
                     const pageChapters = this.parseChapterList(pageHtml, novelURL);
+                    
+                    if (pageChapters.length === 0) {
+                        console.log(`Page ${page} has no chapters, stopping pagination`);
+                        break;
+                    }
+                    
                     allChapters = allChapters.concat(pageChapters);
                     
                     console.log(`Page ${page}: found ${pageChapters.length} chapters (total: ${allChapters.length})`);
                     
                     // Add small delay to be respectful to the server
-                    await new Promise(resolve => setTimeout(resolve, 100));
+                    await new Promise(resolve => setTimeout(resolve, 200));
                     
                 } catch (pageError) {
                     console.log(`Error fetching page ${page}: ${pageError}`);
