@@ -45,9 +45,8 @@ class NovelFullPlugin extends BasePlugin {
         }
     }
 
-    parseNovelList(html, queryType) {
+    async parseNovelList(html, queryType) {
         try {
-            // Use correct selector for the structure we see in the HTML
             const selector = '.list.list-truyen .row';
             
             console.log(`Using selector: ${selector}`);
@@ -56,11 +55,14 @@ class NovelFullPlugin extends BasePlugin {
             
             const novels = [];
             
-            for (let i = 0; i < novelElements.length; i++) {
+            // Process first 10 novels for better performance
+            const elementsToProcess = Math.min(novelElements.length, 10);
+            
+            for (let i = 0; i < elementsToProcess; i++) {
                 try {
                     const element = novelElements[i];
                     
-                    // Get title - check if we have the element and text
+                    // Get title and URL
                     const titleElements = parseHTML(element.html, 'h3.truyen-title a');
                     if (!titleElements || titleElements.length === 0) {
                         console.log(`No title found in element ${i}`);
@@ -76,33 +78,41 @@ class NovelFullPlugin extends BasePlugin {
                         continue;
                     }
                     
-                    // Get cover image
-                    let coverURL = null;
-const coverElements = parseHTML(element.html, 'img.cover, .book img, img');
-if (coverElements && coverElements.length > 0 && coverElements) {
-    const coverElement = coverElements;
-    coverURL = coverElement['data-src'] || coverElement.src;
-    if (coverURL) {
-        coverURL = this.resolveURL(coverURL);
-        console.log(`Debug: Cover URL: ${coverURL}`);
-    }
-}
-                    
-                    // Get author - improved parsing for NovelFull's structure
+                    // Get author from current page
                     let author = null;
                     const authorElements = parseHTML(element.html, '.author');
-                    if (authorElements && authorElements.length > 0 && authorElements[0] && authorElements.text) {
-                        let authorText = authorElements.text.trim();
-                        // Remove the pencil icon and extra whitespace
-                        authorText = authorText.replace(/^\s*\s*/, '').trim();
-                        // Extract just the author name (everything after any icons/symbols)
-                        const cleanAuthor = authorText.split(/\s{2,}/).pop(); // Get last part after multiple spaces
-                        if (cleanAuthor && cleanAuthor.length > 1) {
-                        author = cleanAuthor.trim();
+                    if (authorElements && authorElements.length > 0) {
+                        const authorElement = authorElements;
+                        const authorText = authorElement.text || authorElement.textContent;
+                        if (authorText && authorText.trim()) {
+                            author = authorText.trim()
+                                .replace(/^\s*\s*/, '') // Remove pencil icon
+                                .replace(/\s+/g, ' ')
+                                .trim();
                         }
                     }
-
-                    console.log(`Debug: Raw author text: "${authorElements?.text}" -> Clean: "${author}"`);
+                    
+                    // Fetch full-size cover from detail page
+                    let coverURL = null;
+                    try {
+                        console.log(`Fetching cover for: ${title}`);
+                        const detailHtml = await fetch(novelURL);
+                        const coverElements = parseHTML(detailHtml, '.book img, .cover img, img[src*="cover"]');
+                        
+                        if (coverElements && coverElements.length > 0) {
+                            for (const coverElement of coverElements) {
+                                const src = coverElement.src || coverElement['data-src'];
+                                if (src && (src.includes('cover') || src.includes('upload'))) {
+                                    coverURL = this.resolveURL(src);
+                                    // Convert thumbnail to full size if needed
+                                    coverURL = this.getFullSizeCoverURL(coverURL);
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (coverError) {
+                        console.log(`Failed to fetch cover for ${title}: ${coverError}`);
+                    }
                     
                     const novel = {
                         id: `novelfull_${Date.now()}_${i}`,
@@ -115,7 +125,7 @@ if (coverElements && coverElements.length > 0 && coverElements) {
                     };
                     
                     novels.push(novel);
-                    console.log(`Added novel: "${title}" by ${author || 'Unknown'}`);
+                    console.log(`Added novel: "${title}" by ${author || 'Unknown'} with cover: ${coverURL ? 'Yes' : 'No'}`);
                     
                 } catch (error) {
                     console.log(`Error parsing novel element ${i}: ${error}`);
@@ -131,6 +141,26 @@ if (coverElements && coverElements.length > 0 && coverElements) {
         }
     }
 
+    getFullSizeCoverURL(thumbnailURL) {
+        if (!thumbnailURL) return null;
+        
+        // NovelFull URL patterns for full-size images
+        // Thumbnails are usually in /uploads/thumbs/ with specific suffixes
+        let fullSizeURL = thumbnailURL;
+        
+        // Convert thumbnail to full size
+        if (thumbnailURL.includes('/thumbs/')) {
+            // Remove thumbnail-specific parts
+            fullSizeURL = thumbnailURL
+                .replace('/thumbs/', '/novel/')
+                .replace(/-[a-f0-9]+(-[a-f0-9]+)?\.jpg$/, '.jpg')
+                .replace(/-[a-f0-9]+(-[a-f0-9]+)?\.png$/, '.png');
+        }
+        
+        console.log(`Cover URL conversion: ${thumbnailURL} -> ${fullSizeURL}`);
+        return fullSizeURL;
+    }
+
     resolveURL(url) {
         if (!url) return null;
         if (url.startsWith('http')) return url;
@@ -144,25 +174,46 @@ if (coverElements && coverElements.length > 0 && coverElements) {
             console.log(`Fetching novel details from: ${novelURL}`);
             const html = await fetch(novelURL);
             
-            // Basic parsing for novel details
+            // Parse title
             const titleElements = parseHTML(html, 'h3.title, .title, h1');
             const title = (titleElements && titleElements.length > 0 && titleElements[0].text) ? 
-                titleElements[0].text.trim() : 'Unknown Title';
+                titleElements.text.trim() : 'Unknown Title';
+            
+            // Parse author
+            const authorElements = parseHTML(html, '.info .author, .info a[href*="author"]');
+            const author = (authorElements && authorElements.length > 0 && authorElements.text) ?
+                authorElements.text.trim() : null;
+            
+            // Parse synopsis
+            const synopsisElements = parseHTML(html, '.desc-text, .description');
+            const synopsis = (synopsisElements && synopsisElements.length > 0 && synopsisElements.text) ?
+                synopsisElements.text.trim() : 'No synopsis available';
+            
+            // Parse cover
+            const coverElements = parseHTML(html, '.book img, .cover img');
+            let coverURL = null;
+            if (coverElements && coverElements.length > 0) {
+                const coverElement = coverElements;
+                coverURL = this.resolveURL(coverElement.src || coverElement['data-src']);
+            }
+            
+            // Parse chapters
+            const chapters = this.parseChapterList(html, novelURL);
             
             const novel = {
                 id: `novelfull_${Date.now()}`,
                 title: title,
-                author: null,
-                synopsis: 'Synopsis will be loaded when viewing novel details',
-                coverImageURL: null,
+                author: author,
+                synopsis: synopsis,
+                coverImageURL: coverURL,
                 sourcePlugin: this.id,
                 novelURL: novelURL
             };
             
             return {
                 novel: novel,
-                chapters: [],
-                totalChapters: 0,
+                chapters: chapters,
+                totalChapters: chapters.length,
                 lastUpdated: new Date()
             };
             
@@ -170,6 +221,46 @@ if (coverElements && coverElements.length > 0 && coverElements) {
             console.log(`Error fetching novel details: ${error}`);
             throw error;
         }
+    }
+
+    parseChapterList(html, novelURL) {
+        const chapters = [];
+        const chapterElements = parseHTML(html, '#list-chapter .row a, .chapter-list a');
+        
+        for (let i = 0; i < chapterElements.length; i++) {
+            const element = chapterElements[i];
+            
+            try {
+                const chapterTitle = (element.text) ? element.text.trim() : `Chapter ${i + 1}`;
+                const chapterURL = this.resolveURL(element.href);
+                
+                if (!chapterURL) continue;
+                
+                let chapterNumber = i + 1;
+                const numberMatch = chapterTitle.match(/\d+/);
+                if (numberMatch) {
+                    chapterNumber = parseInt(numberMatch[0]);
+                }
+                
+                const chapter = {
+                    id: `chapter_${Date.now()}_${i}`,
+                    title: chapterTitle,
+                    novelId: novelURL,
+                    chapterNumber: chapterNumber,
+                    url: chapterURL,
+                    content: null,
+                    isDownloaded: false
+                };
+                
+                chapters.push(chapter);
+                
+            } catch (error) {
+                console.log(`Error parsing chapter ${i}: ${error}`);
+            }
+        }
+        
+        console.log(`Parsed ${chapters.length} chapters`);
+        return chapters;
     }
 
     async fetchChapterContent(chapterURL) {
