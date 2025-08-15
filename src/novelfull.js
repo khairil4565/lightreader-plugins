@@ -17,7 +17,6 @@ class NovelFullPlugin extends BasePlugin {
         try {
             let url;
             
-            // Handle different query types
             switch(query.toLowerCase()) {
                 case 'popular':
                     url = `${this.baseURL}/hot-novel`;
@@ -48,48 +47,48 @@ class NovelFullPlugin extends BasePlugin {
 
     parseNovelList(html, queryType) {
         try {
-            // Create a temporary DOM element to parse HTML
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            
-            const novels = [];
-            let novelElements;
-            
-            // Different selectors based on page type
+            // Use native bridge instead of DOMParser
+            let selector = '.list.list-truyen .row';
             if (queryType === 'search') {
-                novelElements = doc.querySelectorAll('.list-truyen .row');
-            } else {
-                novelElements = doc.querySelectorAll('.list.list-truyen .row');
+                selector = '.list-truyen .row';
             }
             
+            const novelElements = querySelector(html, selector);
             console.log(`Found ${novelElements.length} novel elements`);
             
-            novelElements.forEach((element, index) => {
+            const novels = [];
+            
+            for (let i = 0; i < novelElements.length; i++) {
+                const element = novelElements[i];
+                
                 try {
-                    const titleElement = element.querySelector('.truyen-title a') || element.querySelector('h3 a');
-                    if (!titleElement) return;
+                    // Get title and URL
+                    const titleElements = querySelector(element.html, '.truyen-title a, h3 a');
+                    if (titleElements.length === 0) continue;
                     
-                    const title = titleElement.textContent.trim();
-                    const novelURL = this.resolveURL(titleElement.getAttribute('href'));
+                    const titleElement = titleElements[0];
+                    const title = titleElement.text.trim();
+                    const novelURL = this.resolveURL(titleElement.href);
                     
                     // Get cover image
-                    const coverElement = element.querySelector('.book img');
+                    const coverElements = querySelector(element.html, '.book img');
                     let coverURL = null;
-                    if (coverElement) {
-                        coverURL = coverElement.getAttribute('data-src') || coverElement.getAttribute('src');
+                    if (coverElements.length > 0) {
+                        const coverElement = coverElements;
+                        coverURL = coverElement['data-src'] || coverElement.src;
                         coverURL = this.resolveURL(coverURL);
                     }
                     
-                    // Get author if available
-                    const authorElement = element.querySelector('.author');
-                    const author = authorElement ? authorElement.textContent.trim() : null;
+                    // Get author
+                    const authorElements = querySelector(element.html, '.author');
+                    const author = authorElements.length > 0 ? authorElements.text.trim() : null;
                     
-                    // Get synopsis if available
-                    const synopsisElement = element.querySelector('.desc');
-                    const synopsis = synopsisElement ? synopsisElement.textContent.trim() : null;
+                    // Get synopsis
+                    const synopsisElements = querySelector(element.html, '.desc');
+                    const synopsis = synopsisElements.length > 0 ? synopsisElements.text.trim() : null;
                     
                     const novel = {
-                        id: `novelfull_${Date.now()}_${index}`,
+                        id: `novelfull_${Date.now()}_${i}`,
                         title: title,
                         author: author,
                         synopsis: synopsis,
@@ -103,7 +102,7 @@ class NovelFullPlugin extends BasePlugin {
                 } catch (error) {
                     console.log(`Error parsing novel element: ${error}`);
                 }
-            });
+            }
             
             console.log(`Successfully parsed ${novels.length} novels`);
             return novels;
@@ -127,28 +126,26 @@ class NovelFullPlugin extends BasePlugin {
             console.log(`Fetching novel details from: ${novelURL}`);
             const html = await fetch(novelURL);
             
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
+            // Parse novel information using native bridge
+            const titleElements = querySelector(html, 'h3.title');
+            const title = titleElements.length > 0 ? titleElements[0].text.trim() : 'Unknown Title';
             
-            // Parse novel information
-            const titleElement = doc.querySelector('h3.title');
-            const title = titleElement ? titleElement.textContent.trim() : 'Unknown Title';
+            const authorElements = querySelector(html, '.info a[href*="author"]');
+            const author = authorElements.length > 0 ? authorElements.text.trim() : null;
             
-            const authorElement = doc.querySelector('.info a[href*="author"]');
-            const author = authorElement ? authorElement.textContent.trim() : null;
+            const synopsisElements = querySelector(html, '.desc-text');
+            const synopsis = synopsisElements.length > 0 ? synopsisElements.text.trim() : null;
             
-            const synopsisElement = doc.querySelector('.desc-text');
-            const synopsis = synopsisElement ? synopsisElement.textContent.trim() : null;
-            
-            const coverElement = doc.querySelector('.book img');
+            const coverElements = querySelector(html, '.book img');
             let coverURL = null;
-            if (coverElement) {
-                coverURL = coverElement.getAttribute('data-src') || coverElement.getAttribute('src');
+            if (coverElements.length > 0) {
+                const coverElement = coverElements;
+                coverURL = coverElement['data-src'] || coverElement.src;
                 coverURL = this.resolveURL(coverURL);
             }
             
             // Parse chapters
-            const chapters = this.parseChapterList(doc, novelURL);
+            const chapters = this.parseChapterList(html, novelURL);
             
             const novel = {
                 id: `novelfull_${Date.now()}`,
@@ -173,24 +170,25 @@ class NovelFullPlugin extends BasePlugin {
         }
     }
 
-    parseChapterList(doc, novelURL) {
+    parseChapterList(html, novelURL) {
         const chapters = [];
-        const chapterElements = doc.querySelectorAll('#list-chapter .row a');
+        const chapterElements = querySelector(html, '#list-chapter .row a');
         
-        chapterElements.forEach((element, index) => {
+        for (let i = 0; i < chapterElements.length; i++) {
+            const element = chapterElements[i];
+            
             try {
-                const chapterTitle = element.textContent.trim();
-                const chapterURL = this.resolveURL(element.getAttribute('href'));
+                const chapterTitle = element.text.trim();
+                const chapterURL = this.resolveURL(element.href);
                 
-                // Extract chapter number from title
-                let chapterNumber = index + 1;
+                let chapterNumber = i + 1;
                 const numberMatch = chapterTitle.match(/\d+/);
                 if (numberMatch) {
                     chapterNumber = parseInt(numberMatch[0]);
                 }
                 
                 const chapter = {
-                    id: `chapter_${Date.now()}_${index}`,
+                    id: `chapter_${Date.now()}_${i}`,
                     title: chapterTitle,
                     novelId: novelURL,
                     chapterNumber: chapterNumber,
@@ -204,7 +202,7 @@ class NovelFullPlugin extends BasePlugin {
             } catch (error) {
                 console.log(`Error parsing chapter: ${error}`);
             }
-        });
+        }
         
         console.log(`Parsed ${chapters.length} chapters`);
         return chapters;
@@ -215,23 +213,15 @@ class NovelFullPlugin extends BasePlugin {
             console.log(`Fetching chapter content from: ${chapterURL}`);
             const html = await fetch(chapterURL);
             
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            
             // Try different selectors for chapter content
             const contentSelectors = ['#chapter-content', '.chapter-content', '#content', '.content'];
             
             for (const selector of contentSelectors) {
-                const contentElement = doc.querySelector(selector);
-                if (contentElement) {
-                    // Clean up the content
-                    let content = contentElement.textContent.trim();
+                const contentElements = querySelector(html, selector);
+                if (contentElements.length > 0) {
+                    const content = contentElements[0].text.trim();
                     
-                    // Remove common unwanted text
-                    content = content.replace(/\n\s*\n/g, '\n\n'); // Clean up extra newlines
-                    content = content.replace(/^\s+|\s+$/g, ''); // Trim
-                    
-                    if (content.length > 100) { // Ensure meaningful content
+                    if (content.length > 100) {
                         console.log(`Successfully fetched chapter content (${content.length} characters)`);
                         return content;
                     }
@@ -239,14 +229,14 @@ class NovelFullPlugin extends BasePlugin {
             }
             
             // Fallback: get all paragraph content
-            const paragraphs = doc.querySelectorAll('p');
+            const paragraphs = querySelector(html, 'p');
             let content = '';
-            paragraphs.forEach(p => {
-                const text = p.textContent.trim();
+            for (const p of paragraphs) {
+                const text = p.text.trim();
                 if (text.length > 50) {
                     content += text + '\n\n';
                 }
-            });
+            }
             
             return content || 'Chapter content could not be loaded';
             
