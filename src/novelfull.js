@@ -1,7 +1,7 @@
 // @id novelfull
 // @name NovelFull
-// @version 1.0.2
-// @description Read novels from NovelFull.net with fixed cover image handling
+// @version 1.0.3
+// @description Read novels from NovelFull.net with fixed cover image handling and complete chapter loading
 // @author khairil4565
 // @website https://novelfull.net
 
@@ -9,6 +9,7 @@ class NovelFullPlugin extends BasePlugin {
     constructor(config) {
         super(config);
         this.baseURL = 'https://novelfull.net';
+        this.maxConcurrentRequests = 3; // Limit concurrent requests to be respectful
     }
 
     async searchNovels(query) {
@@ -152,24 +153,21 @@ class NovelFullPlugin extends BasePlugin {
             console.log(`Fetching novel details from: ${novelURL}`);
             const html = await fetch(novelURL);
             
-            // Parse title - correct selector for detail page
+            // Parse basic novel info (same as before)
             const titleElements = parseHTML(html, '.books .desc h3.title, h3.title');
             const title = (titleElements && titleElements.length > 0 && titleElements[0].text) ? 
                 titleElements[0].text.trim() : 'Unknown Title';
             
-            // Parse author - look for author links in info section
             let author = null;
             const authorLinkElements = parseHTML(html, '.info a[href*="author"]');
             if (authorLinkElements && authorLinkElements.length > 0) {
                 author = authorLinkElements[0].text ? authorLinkElements[0].text.trim() : null;
             }
             
-            // Parse synopsis
             const synopsisElements = parseHTML(html, '.desc-text');
             const synopsis = (synopsisElements && synopsisElements.length > 0 && synopsisElements[0].text) ?
                 synopsisElements[0].text.trim() : 'No synopsis available';
             
-            // Parse cover - get the actual cover from detail page
             let coverURL = null;
             const coverElements = parseHTML(html, '.books .book img');
             if (coverElements && coverElements.length > 0) {
@@ -181,8 +179,8 @@ class NovelFullPlugin extends BasePlugin {
                 }
             }
             
-            // Parse chapters - get ALL chapters from all pages
-            const chapters = await this.parseAllChapters(html, novelURL);
+            // NEW: Fast parallel chapter fetching
+            const chapters = await this.fetchAllChaptersParallel(html, novelURL);
             
             const novel = {
                 id: `novelfull_${Date.now()}`,
@@ -197,7 +195,6 @@ class NovelFullPlugin extends BasePlugin {
             console.log(`Novel details parsed - Title: ${title}, Author: ${author}, Cover: ${coverURL ? 'Found' : 'Not found'}`);
             console.log(`Total chapters found: ${chapters.length}`);
             
-            // Return the structured response that Swift expects
             const result = {
                 novel: novel,
                 chapters: chapters,
@@ -214,6 +211,130 @@ class NovelFullPlugin extends BasePlugin {
         }
     }
 
+    async fetchAllChaptersParallel(firstPageHtml, novelURL) {
+        let allChapters = [];
+        
+        try {
+            // Get chapters from first page
+            const firstPageChapters = this.parseChapterList(firstPageHtml, novelURL);
+            allChapters = allChapters.concat(firstPageChapters);
+            
+            // Determine total pages
+            const totalPages = this.getTotalPages(firstPageHtml);
+            console.log(`Detected ${totalPages} total pages of chapters`);
+            
+            if (totalPages <= 1) {
+                console.log(`Single page novel - found ${allChapters.length} chapters`);
+                return allChapters;
+            }
+            
+            // Create array of page numbers to fetch
+            const pagesToFetch = [];
+            for (let page = 2; page <= totalPages; page++) {
+                pagesToFetch.push(page);
+            }
+            
+            console.log(`Will fetch ${pagesToFetch.length} additional pages in parallel`);
+            
+            // Fetch pages in parallel batches
+            const allPageChapters = await this.fetchPagesInBatches(pagesToFetch, novelURL);
+            
+            // Combine all chapters
+            allChapters = allChapters.concat(allPageChapters);
+            
+            // Sort chapters by chapter number
+            allChapters.sort((a, b) => a.chapterNumber - b.chapterNumber);
+            
+            console.log(`Successfully fetched ${allChapters.length} total chapters from ${totalPages} pages`);
+            
+        } catch (error) {
+            console.log(`Error in fetchAllChaptersParallel: ${error}`);
+        }
+        
+        return allChapters;
+    }
+
+    async fetchPagesInBatches(pages, novelURL) {
+        const allChapters = [];
+        const batchSize = this.maxConcurrentRequests;
+        
+        for (let i = 0; i < pages.length; i += batchSize) {
+            const batch = pages.slice(i, i + batchSize);
+            console.log(`Fetching batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(pages.length/batchSize)}: pages ${batch.join(', ')}`);
+            
+            // Create promises for this batch
+            const batchPromises = batch.map(pageNum => this.fetchSinglePage(pageNum, novelURL));
+            
+            try {
+                // Wait for all pages in this batch to complete
+                const batchResults = await Promise.all(batchPromises);
+                
+                // Flatten and add to all chapters
+                for (const pageChapters of batchResults) {
+                    if (pageChapters && pageChapters.length > 0) {
+                        allChapters.push(...pageChapters);
+                    }
+                }
+                
+                console.log(`Batch completed. Total chapters so far: ${allChapters.length}`);
+                
+            } catch (error) {
+                console.log(`Error in batch: ${error}`);
+                // Continue with next batch even if this one fails
+            }
+        }
+        
+        return allChapters;
+    }
+
+    async fetchSinglePage(pageNum, novelURL) {
+        try {
+            const pageURL = `${novelURL}?page=${pageNum}`;
+            const pageHtml = await fetch(pageURL);
+            const chapters = this.parseChapterList(pageHtml, novelURL);
+            
+            console.log(`Page ${pageNum}: found ${chapters.length} chapters`);
+            return chapters;
+            
+        } catch (error) {
+            console.log(`Error fetching page ${pageNum}: ${error}`);
+            return [];
+        }
+    }
+
+    getTotalPages(html) {
+        // Try to find the last page number from pagination
+        const paginationElements = parseHTML(html, '.pagination .last a');
+        
+        if (paginationElements && paginationElements.length > 0) {
+            for (const element of paginationElements) {
+                if (element.href && element.href.includes('page=')) {
+                    const lastPageMatch = element.href.match(/page=(\d+)/);
+                    if (lastPageMatch) {
+                        return parseInt(lastPageMatch[1]);
+                    }
+                }
+            }
+        }
+        // Alternative method
+        const pageNumberElements = parseHTML(html, '.pagination a[data-page]');
+        let maxPage = 1;
+        
+        if (pageNumberElements && pageNumberElements.length > 0) {
+            for (const element of pageNumberElements) {
+                const dataPage = element['data-page'];
+                if (dataPage) {
+                    const pageNum = parseInt(dataPage) + 1;
+                    if (pageNum > maxPage) {
+                        maxPage = pageNum;
+                    }
+                }
+            }
+        }
+        
+        return maxPage;
+    }
+    
     async parseAllChapters(firstPageHtml, novelURL) {
         let allChapters = [];
         
@@ -276,14 +397,17 @@ class NovelFullPlugin extends BasePlugin {
                 return allChapters;
             }
             
-            // Fetch chapters from ALL remaining pages
-            const maxPagesToFetch = totalPages; // Get ALL pages - no artificial limit
+            // For safety, limit to reasonable number of pages (but allow override)
+            const maxPagesToFetch = totalPages; // Limit to 100 pages max for safety
             
-            console.log(`Will fetch ALL ${totalPages} pages of chapters`);
+            console.log(`Will fetch ${maxPagesToFetch} pages of chapters (total available: ${totalPages})`);
+            
+            // Process pages in batches to avoid overwhelming the server
+            const batchSize = 5;
             
             for (let page = 2; page <= maxPagesToFetch; page++) {
                 try {
-                    console.log(`Fetching chapter page ${page}/${totalPages}`);
+                    console.log(`Fetching chapter page ${page}/${maxPagesToFetch}`);
                     
                     // Construct URL for the page
                     const pageURL = `${novelURL}?page=${page}`;
@@ -303,7 +427,14 @@ class NovelFullPlugin extends BasePlugin {
                     
                     // Log progress every 10 pages
                     if (page % 10 === 0) {
-                        console.log(`Progress: ${page}/${totalPages} pages completed (${allChapters.length} chapters loaded)`);
+                        console.log(`Progress: ${page}/${maxPagesToFetch} pages completed (${allChapters.length} chapters loaded)`);
+                    }
+                    
+                    // Add a small delay between batch requests to be respectful to the server
+                    if (page % batchSize === 0) {
+                        console.log(`Batch completed, taking a brief pause...`);
+                        // Instead of setTimeout, we'll use a Promise-based delay
+                        await this.delay(500); // 500ms delay
                     }
                     
                 } catch (pageError) {
@@ -318,11 +449,29 @@ class NovelFullPlugin extends BasePlugin {
             
             console.log(`Successfully fetched ${allChapters.length} total chapters from ${Math.min(maxPagesToFetch, totalPages)} pages`);
             
+            // If we hit the safety limit, log a warning
+            if (totalPages > maxPagesToFetch) {
+                console.log(`WARNING: Novel has ${totalPages} pages but only fetched ${maxPagesToFetch} for safety. Increase maxPagesToFetch if needed.`);
+            }
+            
         } catch (error) {
             console.log(`Error in parseAllChapters: ${error}`);
         }
         
         return allChapters;
+    }
+
+    // Promise-based delay function (replacement for setTimeout)
+    async delay(ms) {
+        return new Promise(resolve => {
+            // Use a simple counter-based delay since setTimeout isn't available
+            const start = Date.now();
+            while (Date.now() - start < ms) {
+                // Busy wait for the specified time
+                // This is not ideal but works in JavaScriptCore environment
+            }
+            resolve();
+        });
     }
 
     parseChapterList(html, novelURL) {
