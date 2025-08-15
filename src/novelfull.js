@@ -78,20 +78,31 @@ class NovelFullPlugin extends BasePlugin {
                     
                     // Get cover image
                     let coverURL = null;
-                    const coverElements = parseHTML(element.html, 'img.cover');
-                    if (coverElements && coverElements.length > 0 && coverElements) {
-                        const coverElement = coverElements;
-                        coverURL = this.resolveURL(coverElement.src);
-                    }
+const coverElements = parseHTML(element.html, 'img.cover, .book img, img');
+if (coverElements && coverElements.length > 0 && coverElements) {
+    const coverElement = coverElements;
+    coverURL = coverElement['data-src'] || coverElement.src;
+    if (coverURL) {
+        coverURL = this.resolveURL(coverURL);
+        console.log(`Debug: Cover URL: ${coverURL}`);
+    }
+}
                     
-                    // Get author - with proper null checking
+                    // Get author - improved parsing for NovelFull's structure
                     let author = null;
                     const authorElements = parseHTML(element.html, '.author');
-                    if (authorElements && authorElements.length > 0 && authorElements && authorElements.text) {
-                        author = authorElements.text.trim();
-                        // Remove the pencil icon text if present
-                        author = author.replace(/^\s*\u270F\s*/, '').trim();
+                    if (authorElements && authorElements.length > 0 && authorElements[0] && authorElements.text) {
+                        let authorText = authorElements.text.trim();
+                        // Remove the pencil icon and extra whitespace
+                        authorText = authorText.replace(/^\s*\s*/, '').trim();
+                        // Extract just the author name (everything after any icons/symbols)
+                        const cleanAuthor = authorText.split(/\s{2,}/).pop(); // Get last part after multiple spaces
+                        if (cleanAuthor && cleanAuthor.length > 1) {
+                        author = cleanAuthor.trim();
+                        }
                     }
+
+                    console.log(`Debug: Raw author text: "${authorElements?.text}" -> Clean: "${author}"`);
                     
                     const novel = {
                         id: `novelfull_${Date.now()}_${i}`,
