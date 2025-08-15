@@ -1,26 +1,48 @@
-{
-  "id": "novelfull",
-  "name": "NovelFull",
-  "version": "1.0.0",
-  "base_url": "https://novelfull.net",
-  "endpoints": {
-    "latest_novels": "/latest-release-novel",
-    "hot_novels": "/hot-novel",
-    "search": "/search?keyword={query}",
-    "novel_detail": "/{novel-slug}.html",
-    "chapter_content": "/{novel-slug}/{chapter-slug}.html"
-  },
-  "selectors": {
-    "novel_list": ".list.list-truyen .row",
-    "novel_title": ".truyen-title a",
-    "novel_url": ".truyen-title a",
-    "novel_cover": ".book img",
-    "chapter_list": ".list-chapter li a",
-    "chapter_title": ".chapter-title",
-    "chapter_content": "#chapter-content"
-  },
-  "patterns": {
-    "novel_slug_regex": "https://novelfull.net/(.+?).html",
-    "chapter_slug_regex": "https://novelfull.net/.+?/(.+?).html"
-  }
+// @id novelfull
+// @name NovelFull
+// @version 1.0.0
+// @description Read novels from NovelFull.net
+// @author khairil4565
+// @website https://novelfull.net
+
+class NovelFullPlugin extends BasePlugin {
+    constructor(config) {
+        super(config);
+        this.baseURL = 'https://novelfull.net';
+    }
+
+    async searchNovels(query) {
+        // Placeholder implementation
+        return [{
+            id: 'sample-novel',
+            title: 'Sample Novel',
+            author: 'Sample Author',
+            synopsis: 'This is a sample novel',
+            coverImageURL: null,
+            sourcePlugin: this.id,
+            novelURL: 'https://novelfull.net/sample'
+        }];
+    }
+
+    async fetchNovelDetails(novelURL) {
+        // Placeholder implementation
+        return {
+            novel: {
+                id: 'sample-novel',
+                title: 'Sample Novel',
+                author: 'Sample Author',
+                synopsis: 'Sample synopsis',
+                coverImageURL: null,
+                sourcePlugin: this.id,
+                novelURL: novelURL
+            },
+            chapters: [],
+            totalChapters: 0,
+            lastUpdated: new Date()
+        };
+    }
+
+    async fetchChapterContent(chapterURL) {
+        return "Sample chapter content";
+    }
 }
