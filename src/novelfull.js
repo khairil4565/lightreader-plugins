@@ -276,8 +276,10 @@ class NovelFullPlugin extends BasePlugin {
                 return allChapters;
             }
             
-            // Fetch chapters from remaining pages (limit to prevent too many requests)
-            const maxPagesToFetch = Math.min(totalPages, 10); // Reduced to 10 pages for testing
+            // Fetch chapters from ALL remaining pages
+            const maxPagesToFetch = totalPages; // Get ALL pages - no artificial limit
+            
+            console.log(`Will fetch ALL ${totalPages} pages of chapters`);
             
             for (let page = 2; page <= maxPagesToFetch; page++) {
                 try {
@@ -299,12 +301,15 @@ class NovelFullPlugin extends BasePlugin {
                     
                     console.log(`Page ${page}: found ${pageChapters.length} chapters (total: ${allChapters.length})`);
                     
-                    // Add small delay to be respectful to the server
-                    await new Promise(resolve => setTimeout(resolve, 300));
+                    // Log progress every 10 pages
+                    if (page % 10 === 0) {
+                        console.log(`Progress: ${page}/${totalPages} pages completed (${allChapters.length} chapters loaded)`);
+                    }
                     
                 } catch (pageError) {
                     console.log(`Error fetching page ${page}: ${pageError}`);
-                    break; // Stop if we hit an error
+                    // Don't break on error, try next page
+                    continue;
                 }
             }
             
