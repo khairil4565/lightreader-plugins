@@ -223,36 +223,48 @@ class NovelFullPlugin extends BasePlugin {
             allChapters = allChapters.concat(firstPageChapters);
             
             // Check for pagination by looking for pagination links
-            const paginationElements = parseHTML(firstPageHtml, '.pagination .last a, .pagination .next:not(.disabled) a');
+            const paginationElements = parseHTML(firstPageHtml, '.pagination .last a');
             let totalPages = 1;
+            
+            console.log(`DEBUG: Found ${paginationElements ? paginationElements.length : 0} pagination elements`);
             
             // Try to find the last page number from pagination
             if (paginationElements && paginationElements.length > 0) {
                 for (const element of paginationElements) {
-                    if (element.text && element.text.includes('Last')) {
+                    console.log(`DEBUG: Checking pagination element: text="${element.text}", href="${element.href}"`);
+                    
+                    if (element.href && element.href.includes('page=')) {
                         // Extract page number from Last link
                         const lastPageMatch = element.href.match(/page=(\d+)/);
                         if (lastPageMatch) {
                             totalPages = parseInt(lastPageMatch[1]);
+                            console.log(`DEBUG: Found total pages from Last link: ${totalPages}`);
                             break;
                         }
                     }
                 }
             }
             
-            // Alternative: look for page links with numbers
+            // Alternative: look for page links with numbers if Last link method failed
             if (totalPages === 1) {
                 const pageNumberElements = parseHTML(firstPageHtml, '.pagination a[data-page]');
                 let maxPage = 1;
                 
+                console.log(`DEBUG: Checking ${pageNumberElements ? pageNumberElements.length : 0} page number elements`);
+                
                 if (pageNumberElements && pageNumberElements.length > 0) {
                     for (const element of pageNumberElements) {
-                        const pageNum = parseInt(element['data-page']) + 1; // data-page is 0-indexed
-                        if (pageNum > maxPage) {
-                            maxPage = pageNum;
+                        const dataPage = element['data-page'];
+                        if (dataPage) {
+                            const pageNum = parseInt(dataPage) + 1; // data-page is 0-indexed
+                            console.log(`DEBUG: Found page element with data-page="${dataPage}", pageNum=${pageNum}`);
+                            if (pageNum > maxPage) {
+                                maxPage = pageNum;
+                            }
                         }
                     }
                     totalPages = maxPage;
+                    console.log(`DEBUG: Total pages from data-page method: ${totalPages}`);
                 }
             }
             
@@ -265,7 +277,7 @@ class NovelFullPlugin extends BasePlugin {
             }
             
             // Fetch chapters from remaining pages (limit to prevent too many requests)
-            const maxPagesToFetch = Math.min(totalPages, 25); // Increased limit to 25 pages
+            const maxPagesToFetch = Math.min(totalPages, 10); // Reduced to 10 pages for testing
             
             for (let page = 2; page <= maxPagesToFetch; page++) {
                 try {
@@ -288,7 +300,7 @@ class NovelFullPlugin extends BasePlugin {
                     console.log(`Page ${page}: found ${pageChapters.length} chapters (total: ${allChapters.length})`);
                     
                     // Add small delay to be respectful to the server
-                    await new Promise(resolve => setTimeout(resolve, 200));
+                    await new Promise(resolve => setTimeout(resolve, 300));
                     
                 } catch (pageError) {
                     console.log(`Error fetching page ${page}: ${pageError}`);
