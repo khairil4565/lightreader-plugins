@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2025-08-15T12:46:00Z",
+  "plugins": [
+    {
+      "id": "novelfull",
+      "name": "NovelFull",
+      "version": "1.0.0",
+      "description": "Read novels from NovelFull.net",
+      "author": "khairil4565",
+      "website": "https://novelfull.net",
+      "download_url": "https://raw.githubusercontent.com/khairil4565/lightreader-plugins/main/src/novelfull.js",
+      "icon": "https://novelfull.net/favicon.ico",
+      "supported_features": ["search", "latest", "popular", "details", "chapters"],
+      "language": "en",
+      "status": "active"
+    }
+  ]
+}
