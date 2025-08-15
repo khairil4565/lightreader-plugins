@@ -1,7 +1,7 @@
 // @id novelfull
 // @name NovelFull
-// @version 1.0.0
-// @description Read novels from NovelFull.net
+// @version 1.0.1
+// @description Read novels from NovelFull.net with improved cover image handling
 // @author khairil4565
 // @website https://novelfull.net
 
@@ -63,7 +63,7 @@ class NovelFullPlugin extends BasePlugin {
                     const element = novelElements[i];
                     
                     // Get title and URL
-                    const titleElements = parseHTML(element.html, 'h3.truyen-title a');
+                    const titleElements = parseHTML(element.html, 'h3.truyen-title a, .truyen-title a');
                     if (!titleElements || titleElements.length === 0) {
                         console.log(`No title found in element ${i}`);
                         continue;
@@ -80,49 +80,25 @@ class NovelFullPlugin extends BasePlugin {
                     
                     // Get author from current page
                     let author = null;
-const authorElements = parseHTML(element.html, '.author');
-if (authorElements && authorElements.length > 0) {
-    const authorElement = authorElements[0];
-    // Check all possible text properties
-    const authorText = authorElement.text || authorElement.textContent || authorElement.innerText;
-    console.log(`Debug: Author properties:`, authorElement);
-    console.log(`Debug: Author text found: "${authorText}"`);
-    
-    if (authorText && authorText.trim()) {
-        // Clean up the author name (remove icons, extra whitespace)
-        author = authorText.trim()
-            .replace(/^\s*\s*/, '') // Remove leading pencil icon
-            .replace(/\s+/g, ' ')     // Normalize whitespace
-            .trim();
-        
-        // If still empty after cleaning, set to null
-        if (!author || author.length < 2) {
-            author = null;
-        }
-    }
-}
-                    
-                    // Fetch full-size cover from detail page
-                    let coverURL = null;
-                    try {
-                        console.log(`Fetching cover for: ${title}`);
-                        const detailHtml = await fetch(novelURL);
-                        const coverElements = parseHTML(detailHtml, '.book img, .cover img, img[src*="cover"]');
+                    const authorElements = parseHTML(element.html, '.author');
+                    if (authorElements && authorElements.length > 0) {
+                        const authorElement = authorElements[0];
+                        const authorText = authorElement.text || authorElement.textContent || authorElement.innerText;
                         
-                        if (coverElements && coverElements.length > 0) {
-                            for (const coverElement of coverElements) {
-                                const src = coverElement.src || coverElement['data-src'];
-                                if (src && (src.includes('cover') || src.includes('upload'))) {
-                                    coverURL = this.resolveURL(src);
-                                    // Convert thumbnail to full size if needed
-                                    coverURL = this.getFullSizeCoverURL(coverURL);
-                                    break;
-                                }
+                        if (authorText && authorText.trim()) {
+                            author = authorText.trim()
+                                .replace(/^\s*📝\s*/, '') // Remove pencil icon
+                                .replace(/\s+/g, ' ')     // Normalize whitespace
+                                .trim();
+                            
+                            if (!author || author.length < 2) {
+                                author = null;
                             }
                         }
-                    } catch (coverError) {
-                        console.log(`Failed to fetch cover for ${title}: ${coverError}`);
                     }
+                    
+                    // Get cover image - try multiple approaches
+                    let coverURL = await this.getCoverImageURL(element.html, novelURL, title);
                     
                     const novel = {
                         id: `novelfull_${Date.now()}_${i}`,
@@ -151,20 +127,91 @@ if (authorElements && authorElements.length > 0) {
         }
     }
 
+    async getCoverImageURL(elementHtml, novelURL, title) {
+        try {
+            // First, try to get cover from the list page element
+            const listCoverElements = parseHTML(elementHtml, '.book img, .cover img, img');
+            if (listCoverElements && listCoverElements.length > 0) {
+                for (const coverElement of listCoverElements) {
+                    const src = coverElement.src || coverElement['data-src'];
+                    if (src) {
+                        let coverURL = this.resolveURL(src);
+                        // Convert to full size if it's a thumbnail
+                        coverURL = this.getFullSizeCoverURL(coverURL);
+                        if (coverURL) {
+                            console.log(`Found cover from list page for ${title}: ${coverURL}`);
+                            return coverURL;
+                        }
+                    }
+                }
+            }
+
+            // If not found or is thumbnail, fetch from detail page
+            console.log(`Fetching detail page for better cover: ${title}`);
+            const detailHtml = await fetch(novelURL);
+            
+            // Try multiple selectors for cover images
+            const detailSelectors = [
+                '.book img',
+                '.cover img', 
+                '.info-holder .book img',
+                '.novel-cover img',
+                'img[src*="cover"]',
+                'img[src*="upload"]'
+            ];
+            
+            for (const selector of detailSelectors) {
+                const coverElements = parseHTML(detailHtml, selector);
+                if (coverElements && coverElements.length > 0) {
+                    for (const coverElement of coverElements) {
+                        const src = coverElement.src || coverElement['data-src'];
+                        if (src && (src.includes('cover') || src.includes('upload') || src.includes('novel'))) {
+                            let coverURL = this.resolveURL(src);
+                            coverURL = this.getFullSizeCoverURL(coverURL);
+                            if (coverURL) {
+                                console.log(`Found cover from detail page for ${title}: ${coverURL}`);
+                                return coverURL;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            console.log(`No cover found for ${title}`);
+            return null;
+            
+        } catch (error) {
+            console.log(`Error getting cover for ${title}: ${error}`);
+            return null;
+        }
+    }
+
     getFullSizeCoverURL(thumbnailURL) {
         if (!thumbnailURL) return null;
         
-        // NovelFull URL patterns for full-size images
-        // Thumbnails are usually in /uploads/thumbs/ with specific suffixes
         let fullSizeURL = thumbnailURL;
         
         // Convert thumbnail to full size
         if (thumbnailURL.includes('/thumbs/')) {
-            // Remove thumbnail-specific parts
+            // NovelFull pattern: /thumbs/book-name-hash-hash.jpg -> /novel/book-name.jpg
             fullSizeURL = thumbnailURL
                 .replace('/thumbs/', '/novel/')
-                .replace(/-[a-f0-9]+(-[a-f0-9]+)?\.jpg$/, '.jpg')
-                .replace(/-[a-f0-9]+(-[a-f0-9]+)?\.png$/, '.png');
+                .replace(/-[a-f0-9]{10,}-[a-f0-9]{32}\.jpg$/, '.jpg')
+                .replace(/-[a-f0-9]{10,}-[a-f0-9]{32}\.png$/, '.png')
+                .replace(/-[a-f0-9]{10,}\.jpg$/, '.jpg')
+                .replace(/-[a-f0-9]{10,}\.png$/, '.png');
+        }
+        
+        // Additional cleaning for direct novel URLs
+        if (fullSizeURL.includes('/novel/')) {
+            // Remove any hash suffixes that might still be there
+            fullSizeURL = fullSizeURL.replace(/-[a-f0-9]{8,}\.jpg$/, '.jpg');
+            fullSizeURL = fullSizeURL.replace(/-[a-f0-9]{8,}\.png$/, '.png');
+        }
+        
+        // Ensure we have a valid image extension
+        if (!fullSizeURL.match(/\.(jpg|jpeg|png|webp)$/i)) {
+            fullSizeURL += '.jpg';
         }
         
         console.log(`Cover URL conversion: ${thumbnailURL} -> ${fullSizeURL}`);
@@ -187,25 +234,20 @@ if (authorElements && authorElements.length > 0) {
             // Parse title
             const titleElements = parseHTML(html, 'h3.title, .title, h1');
             const title = (titleElements && titleElements.length > 0 && titleElements[0].text) ? 
-                titleElements.text.trim() : 'Unknown Title';
+                titleElements[0].text.trim() : 'Unknown Title';
             
             // Parse author
-            const authorElements = parseHTML(html, '.info .author, .info a[href*="author"]');
-            const author = (authorElements && authorElements.length > 0 && authorElements.text) ?
-                authorElements.text.trim() : null;
+            const authorElements = parseHTML(html, '.info .author, .info a[href*="author"], .author');
+            const author = (authorElements && authorElements.length > 0 && authorElements[0].text) ?
+                authorElements[0].text.trim() : null;
             
             // Parse synopsis
-            const synopsisElements = parseHTML(html, '.desc-text, .description');
-            const synopsis = (synopsisElements && synopsisElements.length > 0 && synopsisElements.text) ?
-                synopsisElements.text.trim() : 'No synopsis available';
+            const synopsisElements = parseHTML(html, '.desc-text, .description, .summary');
+            const synopsis = (synopsisElements && synopsisElements.length > 0 && synopsisElements[0].text) ?
+                synopsisElements[0].text.trim() : 'No synopsis available';
             
-            // Parse cover
-            const coverElements = parseHTML(html, '.book img, .cover img');
-            let coverURL = null;
-            if (coverElements && coverElements.length > 0) {
-                const coverElement = coverElements;
-                coverURL = this.resolveURL(coverElement.src || coverElement['data-src']);
-            }
+            // Parse cover using the improved method
+            const coverURL = await this.getCoverImageURL(html, novelURL, title);
             
             // Parse chapters
             const chapters = this.parseChapterList(html, novelURL);
@@ -235,7 +277,7 @@ if (authorElements && authorElements.length > 0) {
 
     parseChapterList(html, novelURL) {
         const chapters = [];
-        const chapterElements = parseHTML(html, '#list-chapter .row a, .chapter-list a');
+        const chapterElements = parseHTML(html, '#list-chapter .row a, .chapter-list a, .list-chapter a');
         
         for (let i = 0; i < chapterElements.length; i++) {
             const element = chapterElements[i];
@@ -278,11 +320,21 @@ if (authorElements && authorElements.length > 0) {
             console.log(`Fetching chapter content from: ${chapterURL}`);
             const html = await fetch(chapterURL);
             
-            const contentElements = parseHTML(html, '#chapter-content, .chapter-content');
-            if (contentElements && contentElements.length > 0 && contentElements[0].text) {
-                const content = contentElements.text.trim();
-                if (content.length > 100) {
-                    return content;
+            const contentSelectors = [
+                '#chapter-content',
+                '.chapter-content', 
+                '.chapter-c',
+                '.content',
+                '.chapter-body'
+            ];
+            
+            for (const selector of contentSelectors) {
+                const contentElements = parseHTML(html, selector);
+                if (contentElements && contentElements.length > 0 && contentElements[0].text) {
+                    const content = contentElements[0].text.trim();
+                    if (content.length > 100) {
+                        return content;
+                    }
                 }
             }
             
