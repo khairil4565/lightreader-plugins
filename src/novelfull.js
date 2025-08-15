@@ -195,13 +195,18 @@ class NovelFullPlugin extends BasePlugin {
             };
             
             console.log(`Novel details parsed - Title: ${title}, Author: ${author}, Cover: ${coverURL ? 'Found' : 'Not found'}`);
+            console.log(`Chapters found: ${chapters.length}`);
             
-            return {
+            // Return the structured response that Swift expects
+            const result = {
                 novel: novel,
                 chapters: chapters,
                 totalChapters: chapters.length,
                 lastUpdated: new Date()
             };
+            
+            console.log(`Returning novel detail with structure:`, Object.keys(result));
+            return result;
             
         } catch (error) {
             console.log(`Error fetching novel details: ${error}`);
