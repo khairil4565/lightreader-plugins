@@ -1,7 +1,7 @@
 // @id novelfull
 // @name NovelFull
-// @version 1.0.1
-// @description Read novels from NovelFull.net with improved cover image handling
+// @version 1.0.2
+// @description Read novels from NovelFull.net with fixed cover image handling
 // @author khairil4565
 // @website https://novelfull.net
 
@@ -97,8 +97,20 @@ class NovelFullPlugin extends BasePlugin {
                         }
                     }
                     
-                    // Get cover image - try multiple approaches
-                    let coverURL = await this.getCoverImageURL(element.html, novelURL, title);
+                    // Get cover image from list page
+                    let coverURL = null;
+                    const coverElements = parseHTML(element.html, '.book img, .cover img, img');
+                    if (coverElements && coverElements.length > 0) {
+                        for (const coverElement of coverElements) {
+                            const src = coverElement.src || coverElement['data-src'];
+                            if (src && src.includes('uploads')) {
+                                coverURL = this.resolveURL(src);
+                                // Keep as thumbnail URL - it works better than converted ones
+                                console.log(`Found cover for ${title}: ${coverURL}`);
+                                break;
+                            }
+                        }
+                    }
                     
                     const novel = {
                         id: `novelfull_${Date.now()}_${i}`,
@@ -127,97 +139,6 @@ class NovelFullPlugin extends BasePlugin {
         }
     }
 
-    async getCoverImageURL(elementHtml, novelURL, title) {
-        try {
-            // First, try to get cover from the list page element
-            const listCoverElements = parseHTML(elementHtml, '.book img, .cover img, img');
-            if (listCoverElements && listCoverElements.length > 0) {
-                for (const coverElement of listCoverElements) {
-                    const src = coverElement.src || coverElement['data-src'];
-                    if (src) {
-                        let coverURL = this.resolveURL(src);
-                        // Convert to full size if it's a thumbnail
-                        coverURL = this.getFullSizeCoverURL(coverURL);
-                        if (coverURL) {
-                            console.log(`Found cover from list page for ${title}: ${coverURL}`);
-                            return coverURL;
-                        }
-                    }
-                }
-            }
-
-            // If not found or is thumbnail, fetch from detail page
-            console.log(`Fetching detail page for better cover: ${title}`);
-            const detailHtml = await fetch(novelURL);
-            
-            // Try multiple selectors for cover images
-            const detailSelectors = [
-                '.book img',
-                '.cover img', 
-                '.info-holder .book img',
-                '.novel-cover img',
-                'img[src*="cover"]',
-                'img[src*="upload"]'
-            ];
-            
-            for (const selector of detailSelectors) {
-                const coverElements = parseHTML(detailHtml, selector);
-                if (coverElements && coverElements.length > 0) {
-                    for (const coverElement of coverElements) {
-                        const src = coverElement.src || coverElement['data-src'];
-                        if (src && (src.includes('cover') || src.includes('upload') || src.includes('novel'))) {
-                            let coverURL = this.resolveURL(src);
-                            coverURL = this.getFullSizeCoverURL(coverURL);
-                            if (coverURL) {
-                                console.log(`Found cover from detail page for ${title}: ${coverURL}`);
-                                return coverURL;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            console.log(`No cover found for ${title}`);
-            return null;
-            
-        } catch (error) {
-            console.log(`Error getting cover for ${title}: ${error}`);
-            return null;
-        }
-    }
-
-    getFullSizeCoverURL(thumbnailURL) {
-        if (!thumbnailURL) return null;
-        
-        let fullSizeURL = thumbnailURL;
-        
-        // Convert thumbnail to full size
-        if (thumbnailURL.includes('/thumbs/')) {
-            // NovelFull pattern: /thumbs/book-name-hash-hash.jpg -> /novel/book-name.jpg
-            fullSizeURL = thumbnailURL
-                .replace('/thumbs/', '/novel/')
-                .replace(/-[a-f0-9]{10,}-[a-f0-9]{32}\.jpg$/, '.jpg')
-                .replace(/-[a-f0-9]{10,}-[a-f0-9]{32}\.png$/, '.png')
-                .replace(/-[a-f0-9]{10,}\.jpg$/, '.jpg')
-                .replace(/-[a-f0-9]{10,}\.png$/, '.png');
-        }
-        
-        // Additional cleaning for direct novel URLs
-        if (fullSizeURL.includes('/novel/')) {
-            // Remove any hash suffixes that might still be there
-            fullSizeURL = fullSizeURL.replace(/-[a-f0-9]{8,}\.jpg$/, '.jpg');
-            fullSizeURL = fullSizeURL.replace(/-[a-f0-9]{8,}\.png$/, '.png');
-        }
-        
-        // Ensure we have a valid image extension
-        if (!fullSizeURL.match(/\.(jpg|jpeg|png|webp)$/i)) {
-            fullSizeURL += '.jpg';
-        }
-        
-        console.log(`Cover URL conversion: ${thumbnailURL} -> ${fullSizeURL}`);
-        return fullSizeURL;
-    }
-
     resolveURL(url) {
         if (!url) return null;
         if (url.startsWith('http')) return url;
@@ -231,23 +152,34 @@ class NovelFullPlugin extends BasePlugin {
             console.log(`Fetching novel details from: ${novelURL}`);
             const html = await fetch(novelURL);
             
-            // Parse title
-            const titleElements = parseHTML(html, 'h3.title, .title, h1');
+            // Parse title - correct selector for detail page
+            const titleElements = parseHTML(html, '.books .desc h3.title, h3.title');
             const title = (titleElements && titleElements.length > 0 && titleElements[0].text) ? 
                 titleElements[0].text.trim() : 'Unknown Title';
             
-            // Parse author
-            const authorElements = parseHTML(html, '.info .author, .info a[href*="author"], .author');
-            const author = (authorElements && authorElements.length > 0 && authorElements[0].text) ?
-                authorElements[0].text.trim() : null;
+            // Parse author - look for author links in info section
+            let author = null;
+            const authorLinkElements = parseHTML(html, '.info a[href*="author"]');
+            if (authorLinkElements && authorLinkElements.length > 0) {
+                author = authorLinkElements[0].text ? authorLinkElements[0].text.trim() : null;
+            }
             
             // Parse synopsis
-            const synopsisElements = parseHTML(html, '.desc-text, .description, .summary');
+            const synopsisElements = parseHTML(html, '.desc-text');
             const synopsis = (synopsisElements && synopsisElements.length > 0 && synopsisElements[0].text) ?
                 synopsisElements[0].text.trim() : 'No synopsis available';
             
-            // Parse cover using the improved method
-            const coverURL = await this.getCoverImageURL(html, novelURL, title);
+            // Parse cover - get the actual cover from detail page
+            let coverURL = null;
+            const coverElements = parseHTML(html, '.books .book img');
+            if (coverElements && coverElements.length > 0) {
+                const coverElement = coverElements[0];
+                const src = coverElement.src || coverElement['data-src'];
+                if (src && src.includes('uploads')) {
+                    coverURL = this.resolveURL(src);
+                    console.log(`Found cover from detail page: ${coverURL}`);
+                }
+            }
             
             // Parse chapters
             const chapters = this.parseChapterList(html, novelURL);
@@ -261,6 +193,8 @@ class NovelFullPlugin extends BasePlugin {
                 sourcePlugin: this.id,
                 novelURL: novelURL
             };
+            
+            console.log(`Novel details parsed - Title: ${title}, Author: ${author}, Cover: ${coverURL ? 'Found' : 'Not found'}`);
             
             return {
                 novel: novel,
