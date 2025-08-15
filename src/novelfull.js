@@ -80,17 +80,27 @@ class NovelFullPlugin extends BasePlugin {
                     
                     // Get author from current page
                     let author = null;
-                    const authorElements = parseHTML(element.html, '.author');
-                    if (authorElements && authorElements.length > 0) {
-                        const authorElement = authorElements;
-                        const authorText = authorElement.text || authorElement.textContent;
-                        if (authorText && authorText.trim()) {
-                            author = authorText.trim()
-                                .replace(/^\s*\s*/, '') // Remove pencil icon
-                                .replace(/\s+/g, ' ')
-                                .trim();
-                        }
-                    }
+const authorElements = parseHTML(element.html, '.author');
+if (authorElements && authorElements.length > 0) {
+    const authorElement = authorElements[0];
+    // Check all possible text properties
+    const authorText = authorElement.text || authorElement.textContent || authorElement.innerText;
+    console.log(`Debug: Author properties:`, authorElement);
+    console.log(`Debug: Author text found: "${authorText}"`);
+    
+    if (authorText && authorText.trim()) {
+        // Clean up the author name (remove icons, extra whitespace)
+        author = authorText.trim()
+            .replace(/^\s*\s*/, '') // Remove leading pencil icon
+            .replace(/\s+/g, ' ')     // Normalize whitespace
+            .trim();
+        
+        // If still empty after cleaning, set to null
+        if (!author || author.length < 2) {
+            author = null;
+        }
+    }
+}
                     
                     // Fetch full-size cover from detail page
                     let coverURL = null;
