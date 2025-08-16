@@ -1,15 +1,56 @@
 {
-  "version": "1.0.0",
-  "last_updated": "2025-08-15T13:31:00Z",
+  "version": "1.0.1",
+  "last_updated": "2025-08-16T10:27:00Z",
   "plugins": [
     {
       "id": "novelfull",
       "name": "NovelFull", 
-      "version": "1.0.0",
-      "description": "Read novels from NovelFull.net",
+      "version": "1.0.4",
+      "description": "Read novels from NovelFull.net with full-size cover images and enhanced chapter loading",
       "author": "khairil4565",
       "download_url": "https://raw.githubusercontent.com/khairil4565/lightreader-plugins/main/src/novelfull.js",
-      "icon": null
+      "icon": null,
+      "features": [
+        "Full-size cover images",
+        "Parallel chapter loading", 
+        "Category browsing (Popular, Hot, Latest, Completed)",
+        "Search functionality",
+        "Proper paragraph formatting"
+      ],
+      "website": "https://novelfull.net"
+    },
+    {
+      "id": "readnovelfull",
+      "name": "ReadNovelFull",
+      "version": "1.0.0", 
+      "description": "Read novels from ReadNovelFull.com with complete chapter loading and cover image support",
+      "author": "khairil4565",
+      "download_url": "https://raw.githubusercontent.com/khairil4565/lightreader-plugins/main/src/readnovelfull.js",
+      "icon": null,
+      "features": [
+        "Category browsing (Popular, Hot, Latest, Completed)",
+        "Search functionality",
+        "Parallel chapter loading",
+        "Cover image support",
+        "Proper paragraph formatting"
+      ],
+      "website": "https://readnovelfull.com"
     }
-  ]
+  ],
+  "changelog": {
+    "1.0.1": [
+      "Added ReadNovelFull plugin",
+      "Updated NovelFull plugin to v1.0.4 with full-size cover images",
+      "Enhanced chapter content formatting with proper paragraphs",
+      "Improved parallel chapter loading performance"
+    ]
+  },
+  "metadata": {
+    "total_plugins": 2,
+    "supported_sources": [
+      "novelfull.net",
+      "readnovelfull.com"
+    ],
+    "min_app_version": "1.0.0"
+  }
 }
