@@ -20,16 +20,16 @@ class ReadNovelFullPlugin extends BasePlugin {
             
             switch(query.toLowerCase()) {
                 case 'popular':
-                    url = `${this.baseURL}/popular-novel`;
+                    url = `${this.baseURL}/novel-list/most-popular`;
                     break;
                 case 'latest':
-                    url = `${this.baseURL}/latest-release-novel`;
+                    url = `${this.baseURL}/novel-list/latest-release-novel`;
                     break;
                 case 'hot':
-                    url = `${this.baseURL}/hot-novel`;
+                    url = `${this.baseURL}/novel-list/hot-novel`;
                     break;
                 case 'completed':
-                    url = `${this.baseURL}/completed-novel`;
+                    url = `${this.baseURL}/novel-list/completed-novel`;
                     break;
                 default:
                     url = `${this.baseURL}/search?keyword=${encodeURIComponent(query)}`;
@@ -48,12 +48,39 @@ class ReadNovelFullPlugin extends BasePlugin {
 
     async parseNovelList(html, queryType) {
         try {
-            // ReadNovelFull uses different selectors than NovelFull
-            const selector = '.list-novel .row, .novel-list .row, .list .row';
+            // ReadNovelFull uses different selectors - try multiple patterns
+            let selector = '.list .row';
             
             console.log(`Using selector: ${selector}`);
-            const novelElements = parseHTML(html, selector);
-            console.log(`Found ${novelElements.length} novel elements`);
+            let novelElements = parseHTML(html, selector);
+            
+            // If first selector doesn't work, try alternatives
+            if (!novelElements || novelElements.length === 0) {
+                const alternativeSelectors = [
+                    '.novel-list .row',
+                    '.list-novel .row', 
+                    '.list-group .list-group-item',
+                    '.col-novel-main .col-novel-item',
+                    '.novel-item',
+                    '.book-item'
+                ];
+                
+                for (const altSelector of alternativeSelectors) {
+                    console.log(`Trying alternative selector: ${altSelector}`);
+                    novelElements = parseHTML(html, altSelector);
+                    if (novelElements && novelElements.length > 0) {
+                        selector = altSelector;
+                        break;
+                    }
+                }
+            }
+            
+            console.log(`Found ${novelElements ? novelElements.length : 0} novel elements with selector: ${selector}`);
+            
+            if (!novelElements || novelElements.length === 0) {
+                console.log(`No novels found. HTML preview: ${html.substring(0, 500)}`);
+                return [];
+            }
             
             const novels = [];
             
@@ -64,53 +91,92 @@ class ReadNovelFullPlugin extends BasePlugin {
                 try {
                     const element = novelElements[i];
                     
-                    // Get title and URL - ReadNovelFull structure
-                    const titleElements = parseHTML(element.html, '.novel-title a, .title a, h3 a, h4 a');
-                    if (!titleElements || titleElements.length === 0) {
+                    // Try multiple title selectors
+                    const titleSelectors = [
+                        '.novel-title a',
+                        '.title a', 
+                        'h3 a', 
+                        'h4 a',
+                        'h5 a',
+                        '.book-title a',
+                        'a[href*="/novel/"]'
+                    ];
+                    
+                    let titleElement = null;
+                    let usedSelector = '';
+                    
+                    for (const titleSel of titleSelectors) {
+                        const titleElements = parseHTML(element.html, titleSel);
+                        if (titleElements && titleElements.length > 0) {
+                            titleElement = titleElements[0];
+                            usedSelector = titleSel;
+                            break;
+                        }
+                    }
+                    
+                    if (!titleElement) {
                         console.log(`No title found in element ${i}`);
                         continue;
                     }
                     
-                    const titleElement = titleElements[0];
                     const title = titleElement.text ? titleElement.text.trim() : '';
                     const novelURL = this.resolveURL(titleElement.href);
+                    
+                    console.log(`Found novel: "${title}" with URL: ${novelURL} using selector: ${usedSelector}`);
                     
                     if (!title || !novelURL) {
                         console.log(`Skipping element ${i}: title="${title}", url="${novelURL}"`);
                         continue;
                     }
                     
-                    // Get author from current page
+                    // Get author - try multiple selectors
                     let author = null;
-                    const authorElements = parseHTML(element.html, '.author, .novel-author');
-                    if (authorElements && authorElements.length > 0) {
-                        const authorElement = authorElements[0];
-                        const authorText = authorElement.text || authorElement.textContent || authorElement.innerText;
-                        
-                        if (authorText && authorText.trim()) {
-                            author = authorText.trim()
-                                .replace(/^Author:\s*/i, '') // Remove "Author:" prefix
-                                .replace(/^\s*📝\s*/, '') // Remove pencil icon
-                                .replace(/\s+/g, ' ')     // Normalize whitespace
-                                .trim();
+                    const authorSelectors = ['.author', '.novel-author', '.book-author', '.writer'];
+                    
+                    for (const authorSel of authorSelectors) {
+                        const authorElements = parseHTML(element.html, authorSel);
+                        if (authorElements && authorElements.length > 0) {
+                            const authorElement = authorElements[0];
+                            const authorText = authorElement.text || authorElement.textContent || authorElement.innerText;
                             
-                            if (!author || author.length < 2) {
-                                author = null;
+                            if (authorText && authorText.trim()) {
+                                author = authorText.trim()
+                                    .replace(/^Author:\s*/i, '')
+                                    .replace(/^\s*📝\s*/, '')
+                                    .replace(/\s+/g, ' ')
+                                    .trim();
+                                
+                                if (author && author.length >= 2) {
+                                    break;
+                                }
                             }
                         }
                     }
                     
-                    // Get cover image from list page
+                    // Get cover image - try multiple selectors
                     let coverURL = null;
-                    const coverElements = parseHTML(element.html, '.novel-cover img, .cover img, .book img, img');
-                    if (coverElements && coverElements.length > 0) {
-                        for (const coverElement of coverElements) {
-                            const src = coverElement.src || coverElement['data-src'] || coverElement['data-original'];
-                            if (src && (src.includes('cover') || src.includes('thumb') || src.includes('image'))) {
-                                coverURL = this.resolveURL(src);
-                                console.log(`Found cover for ${title}: ${coverURL}`);
-                                break;
+                    const coverSelectors = [
+                        '.novel-cover img', 
+                        '.cover img', 
+                        '.book img', 
+                        '.book-cover img',
+                        'img[src*="cover"]',
+                        'img[src*="thumb"]',
+                        'img'
+                    ];
+                    
+                    for (const coverSel of coverSelectors) {
+                        const coverElements = parseHTML(element.html, coverSel);
+                        if (coverElements && coverElements.length > 0) {
+                            for (const coverElement of coverElements) {
+                                const src = coverElement.src || coverElement['data-src'] || coverElement['data-original'];
+                                if (src && (src.includes('cover') || src.includes('thumb') || src.includes('image') || src.includes('.jpg') || src.includes('.png'))) {
+                                    coverURL = this.resolveURL(src);
+                                    console.log(`Found cover for ${title}: ${coverURL}`);
+                                    break;
+                                }
                             }
+                            if (coverURL) break;
                         }
                     }
                     
@@ -125,7 +191,7 @@ class ReadNovelFullPlugin extends BasePlugin {
                     };
                     
                     novels.push(novel);
-                    console.log(`Added novel: "${title}" by ${author || 'Unknown'} with cover: ${coverURL ? 'Yes' : 'No'}`);
+                    console.log(`✅ Added novel: "${title}" by ${author || 'Unknown'} with cover: ${coverURL ? 'Yes' : 'No'}`);
                     
                 } catch (error) {
                     console.log(`Error parsing novel element ${i}: ${error}`);
