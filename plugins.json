@@ -22,7 +22,7 @@
     {
       "id": "readnovelfull",
       "name": "ReadNovelFull",
-      "version": "1.0.0", 
+      "version": "1.0.2", 
       "description": "Read novels from ReadNovelFull.com with complete chapter loading and cover image support",
       "author": "khairil4565",
       "download_url": "https://raw.githubusercontent.com/khairil4565/lightreader-plugins/main/src/readnovelfull.js",
