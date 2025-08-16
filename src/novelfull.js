@@ -1,6 +1,6 @@
 // @id novelfull
 // @name NovelFull
-// @version 1.0.3
+// @version 1.0.4
 // @description Read novels from NovelFull.net with fixed cover image handling and complete chapter loading
 // @author khairil4565
 // @website https://novelfull.net
