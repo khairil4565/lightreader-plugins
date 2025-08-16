@@ -1,6 +1,6 @@
 // @id novelfull
 // @name NovelFull
-// @version 1.0.3
+// @version 1.0.4
 // @description Read novels from NovelFull.net with fixed cover image handling and complete chapter loading
 // @author khairil4565
 // @website https://novelfull.net
@@ -10,6 +10,26 @@ class NovelFullPlugin extends BasePlugin {
         super(config);
         this.baseURL = 'https://novelfull.net';
         this.maxConcurrentRequests = 3; // Limit concurrent requests to be respectful
+    }
+
+    // 🔧 UNIVERSAL COVER CONVERSION METHOD
+    convertToFullSizeCover(imageURL, novelTitle = '') {
+        if (!imageURL) return imageURL;
+        
+        // Convert the known small thumbnail hash to full-size hash
+        if (imageURL.includes('-00aa49a68cf30c9157b01d4feff36ff7.jpg')) {
+            const fullSizeURL = imageURL.replace(
+                '-00aa49a68cf30c9157b01d4feff36ff7.jpg',
+                '-2239c49aee6b961904acf173b7e4602a.jpg'
+            );
+            console.log(`✅ Converted to full-size cover${novelTitle ? ` for ${novelTitle}` : ''}`);
+            console.log(`   From: ${imageURL}`);
+            console.log(`   To:   ${fullSizeURL}`);
+            return fullSizeURL;
+        }
+        
+        // If it's already a full-size image or unknown format, return as-is
+        return imageURL;
     }
 
     async searchNovels(query) {
@@ -98,15 +118,19 @@ class NovelFullPlugin extends BasePlugin {
                         }
                     }
                     
-                    // Get cover image from list page
+                    // Get cover image from list page - WITH FULL-SIZE FIX
                     let coverURL = null;
                     const coverElements = parseHTML(element.html, '.book img, .cover img, img');
                     if (coverElements && coverElements.length > 0) {
                         for (const coverElement of coverElements) {
                             const src = coverElement.src || coverElement['data-src'];
                             if (src && src.includes('uploads')) {
-                                coverURL = this.resolveURL(src);
-                                // Keep as thumbnail URL - it works better than converted ones
+                                let processedSrc = this.resolveURL(src);
+                                
+                                // 🔧 UNIVERSAL FIX: Convert ALL small thumbnails to full-size covers
+                                processedSrc = this.convertToFullSizeCover(processedSrc, title);
+                                
+                                coverURL = processedSrc;
                                 console.log(`Found cover for ${title}: ${coverURL}`);
                                 break;
                             }
@@ -168,6 +192,7 @@ class NovelFullPlugin extends BasePlugin {
             const synopsis = (synopsisElements && synopsisElements.length > 0 && synopsisElements[0].text) ?
                 synopsisElements[0].text.trim() : 'No synopsis available';
             
+            // Get cover image from detail page - WITH FULL-SIZE FIX
             let coverURL = null;
             const coverElements = parseHTML(html, '.books .book img');
             if (coverElements && coverElements.length > 0) {
@@ -175,6 +200,10 @@ class NovelFullPlugin extends BasePlugin {
                 const src = coverElement.src || coverElement['data-src'];
                 if (src && src.includes('uploads')) {
                     coverURL = this.resolveURL(src);
+                    
+                    // 🔧 UNIVERSAL FIX: Convert ALL small thumbnails to full-size covers
+                    coverURL = this.convertToFullSizeCover(coverURL, title);
+                    
                     console.log(`Found cover from detail page: ${coverURL}`);
                 }
             }
