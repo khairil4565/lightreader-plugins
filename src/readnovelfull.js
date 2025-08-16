@@ -1,6 +1,6 @@
 // @id readnovelfull
 // @name ReadNovelFull
-// @version 1.0.4
+// @version 1.0.5
 // @description Read novels from ReadNovelFull.com with complete chapter loading and cover image support
 // @author khairil4565
 // @website https://readnovelfull.com
@@ -49,34 +49,28 @@ class ReadNovelFullPlugin extends BasePlugin {
     async parseNovelList(html, queryType) {
         try {
             console.log(`ReadNovelFull: Starting to parse novel list for query: ${queryType}`);
-            console.log(`ReadNovelFull: HTML length: ${html ? html.length : 0} characters`);
             
             // ReadNovelFull uses specific structure
             const selectorPatterns = [
                 '.list .row',
                 '.list-novel .row',
-                '.novel-list .row', 
                 '.hot-item',
                 '.s-title',
                 'tr'
             ];
             
             let novelElements = null;
-            let workingSelector = '';
             
             for (const selector of selectorPatterns) {
-                console.log(`ReadNovelFull: Trying selector: ${selector}`);
                 novelElements = parseHTML(html, selector);
-                
                 if (novelElements && novelElements.length > 0) {
-                    workingSelector = selector;
                     console.log(`ReadNovelFull: ✅ Found ${novelElements.length} elements with selector: ${selector}`);
                     break;
                 }
             }
             
             if (!novelElements || novelElements.length === 0) {
-                console.log(`ReadNovelFull: ❌ No novel elements found with any selector`);
+                console.log(`ReadNovelFull: ❌ No novel elements found`);
                 return [];
             }
             
@@ -86,7 +80,6 @@ class ReadNovelFullPlugin extends BasePlugin {
             for (let i = 0; i < elementsToProcess; i++) {
                 try {
                     const element = novelElements[i];
-                    console.log(`ReadNovelFull: Processing element ${i + 1}/${elementsToProcess}`);
                     
                     // Try multiple title selectors
                     const titleSelectors = [
@@ -103,43 +96,21 @@ class ReadNovelFullPlugin extends BasePlugin {
                         const titleElements = parseHTML(element.html, titleSel);
                         if (titleElements && titleElements.length > 0) {
                             titleElement = titleElements[0];
-                            console.log(`ReadNovelFull: ✅ Found title with selector: ${titleSel}`);
                             break;
                         }
                     }
                     
-                    if (!titleElement) {
-                        console.log(`ReadNovelFull: ❌ No title found in element ${i}`);
-                        continue;
-                    }
+                    if (!titleElement) continue;
                     
                     const title = titleElement.text ? titleElement.text.trim() : '';
                     const novelURL = this.resolveURL(titleElement.href);
                     
-                    if (!title || !novelURL || title.length < 2) {
-                        console.log(`ReadNovelFull: ❌ Skipping invalid novel: title="${title}", url="${novelURL}"`);
-                        continue;
-                    }
-                    
-                    // Try to find author
-                    let author = null;
-                    const authorSelectors = ['.genre', '.author', 'td:nth-child(2)'];
-                    
-                    for (const authorSel of authorSelectors) {
-                        const authorElements = parseHTML(element.html, authorSel);
-                        if (authorElements && authorElements.length > 0) {
-                            const authorText = authorElements[0].text;
-                            if (authorText && authorText.trim()) {
-                                author = authorText.trim().replace(/^Author:\s*/i, '');
-                                break;
-                            }
-                        }
-                    }
+                    if (!title || !novelURL || title.length < 2) continue;
                     
                     const novel = {
                         id: `readnovelfull_${Date.now()}_${i}`,
                         title: title,
-                        author: author,
+                        author: null,
                         synopsis: null,
                         coverImageURL: null,
                         sourcePlugin: this.id,
@@ -147,18 +118,18 @@ class ReadNovelFullPlugin extends BasePlugin {
                     };
                     
                     novels.push(novel);
-                    console.log(`ReadNovelFull: ✅ Successfully added novel: "${title}"`);
+                    console.log(`ReadNovelFull: ✅ Added novel: "${title}"`);
                     
                 } catch (error) {
-                    console.log(`ReadNovelFull: ❌ Error parsing element ${i}: ${error}`);
+                    console.log(`ReadNovelFull: Error parsing element ${i}: ${error}`);
                 }
             }
             
-            console.log(`ReadNovelFull: ✅ Successfully parsed ${novels.length} novels total`);
+            console.log(`ReadNovelFull: Successfully parsed ${novels.length} novels`);
             return novels;
             
         } catch (error) {
-            console.log(`ReadNovelFull: ❌ Error in parseNovelList: ${error}`);
+            console.log(`ReadNovelFull: Error in parseNovelList: ${error}`);
             return [];
         }
     }
@@ -176,85 +147,67 @@ class ReadNovelFullPlugin extends BasePlugin {
             console.log(`ReadNovelFull: Fetching novel details from: ${novelURL}`);
             const html = await fetch(novelURL);
             
-            console.log(`ReadNovelFull: HTML length: ${html ? html.length : 0} characters`);
-            
             // Parse basic novel info
             let title = "Unknown Title";
             let author = null;
             let synopsis = "No synopsis available";
             let coverURL = null;
+            let novelId = null;
             
-            // Extract title - ReadNovelFull specific
+            // Extract title
             const titleSelectors = [
                 '.title',
                 'h3.title',
-                'h1',
-                '.desc h3'
+                'h1'
             ];
             
             for (const selector of titleSelectors) {
                 const titleElements = parseHTML(html, selector);
                 if (titleElements && titleElements.length > 0 && titleElements[0].text) {
                     title = titleElements[0].text.trim();
-                    console.log(`ReadNovelFull: Found title: ${title}`);
                     break;
                 }
             }
             
-            // Extract author - ReadNovelFull specific
-            const authorSelectors = [
-                '.info-meta li:contains("Author:") a',
-                'a[href*="/authors/"]'
-            ];
+            // Extract author
+            const authorElements = parseHTML(html, 'a[href*="/authors/"]');
+            if (authorElements && authorElements.length > 0 && authorElements[0].text) {
+                author = authorElements[0].text.trim();
+            }
             
-            for (const selector of authorSelectors) {
-                const authorElements = parseHTML(html, selector);
-                if (authorElements && authorElements.length > 0 && authorElements[0].text) {
-                    author = authorElements[0].text.trim();
-                    console.log(`ReadNovelFull: Found author: ${author}`);
-                    break;
+            // Extract synopsis
+            const synopsisElements = parseHTML(html, '.desc-text');
+            if (synopsisElements && synopsisElements.length > 0 && synopsisElements[0].text) {
+                synopsis = synopsisElements[0].text.trim();
+            }
+            
+            // Extract cover image
+            const coverElements = parseHTML(html, '.book img');
+            if (coverElements && coverElements.length > 0) {
+                const src = coverElements[0].src;
+                if (src) {
+                    coverURL = this.resolveURL(src);
                 }
             }
             
-            // Extract synopsis - ReadNovelFull specific
-            const synopsisSelectors = [
-                '.desc-text',
-                '#tab-description .desc-text',
-                '.description'
-            ];
-            
-            for (const selector of synopsisSelectors) {
-                const synopsisElements = parseHTML(html, selector);
-                if (synopsisElements && synopsisElements.length > 0 && synopsisElements[0].text) {
-                    synopsis = synopsisElements[0].text.trim();
-                    console.log(`ReadNovelFull: Found synopsis: ${synopsis.substring(0, 100)}...`);
-                    break;
+            // CRITICAL: Extract novel ID for AJAX chapter loading
+            // This is the key insight from LNReader - they use the data-novel-id attribute
+            const novelIdMatch = html.match(/data-novel-id="([^"]+)"/);
+            if (novelIdMatch) {
+                novelId = novelIdMatch[1];
+                console.log(`ReadNovelFull: Found novel ID: ${novelId}`);
+            } else {
+                // Fallback: extract from URL
+                const urlMatch = novelURL.match(/\/([^\/]+)\.html$/);
+                if (urlMatch) {
+                    novelId = urlMatch[1];
+                    console.log(`ReadNovelFull: Using URL-based novel ID: ${novelId}`);
                 }
             }
             
-            // Extract cover image - ReadNovelFull specific
-            const coverSelectors = [
-                '.book img',
-                '.books img',
-                'img[src*="thumb"]'
-            ];
-            
-            for (const selector of coverSelectors) {
-                const coverElements = parseHTML(html, selector);
-                if (coverElements && coverElements.length > 0) {
-                    const coverElement = coverElements[0];
-                    const src = coverElement.src;
-                    if (src) {
-                        coverURL = this.resolveURL(src);
-                        console.log(`ReadNovelFull: Found cover: ${coverURL}`);
-                        break;
-                    }
-                }
-            }
-            
-            // Parse chapter list
+            // Parse chapter list using AJAX endpoint (key insight from LNReader)
             console.log(`ReadNovelFull: Starting to parse chapter list...`);
-            const chapters = await this.parseChapterListFromNovelPage(html, novelURL);
+            const chapters = await this.fetchChapterListViaAjax(novelId, novelURL);
             
             const novel = {
                 id: `readnovelfull_${Date.now()}`,
@@ -266,21 +219,14 @@ class ReadNovelFullPlugin extends BasePlugin {
                 novelURL: novelURL
             };
             
-            console.log(`ReadNovelFull: Novel details parsed:`);
-            console.log(`  Title: ${title}`);
-            console.log(`  Author: ${author}`);
-            console.log(`  Cover: ${coverURL ? 'Found' : 'Not found'}`);
-            console.log(`  Chapters: ${chapters.length}`);
+            console.log(`ReadNovelFull: Novel details parsed: ${title} with ${chapters.length} chapters`);
             
-            const result = {
+            return {
                 novel: novel,
                 chapters: chapters,
                 totalChapters: chapters.length,
                 lastUpdated: new Date()
             };
-            
-            console.log(`ReadNovelFull: Returning novel detail with ${chapters.length} chapters`);
-            return result;
             
         } catch (error) {
             console.log(`ReadNovelFull: Error fetching novel details: ${error}`);
@@ -288,101 +234,48 @@ class ReadNovelFullPlugin extends BasePlugin {
         }
     }
 
-    async parseChapterListFromNovelPage(html, novelURL) {
+    // This is the KEY method - based on LNReader's approach
+    async fetchChapterListViaAjax(novelId, novelURL) {
         try {
-            console.log(`ReadNovelFull: Parsing chapter list from novel page`);
-            console.log(`ReadNovelFull: Novel URL: ${novelURL}`);
+            if (!novelId) {
+                console.log(`ReadNovelFull: No novel ID found, falling back to HTML parsing`);
+                return this.parseChapterListFromHTML(novelURL);
+            }
             
-            // ReadNovelFull specific chapter selectors based on the HTML structure
+            // Use ReadNovelFull's AJAX endpoint to get complete chapter list
+            const ajaxURL = `${this.baseURL}/ajax/chapter-archive?novelId=${novelId}`;
+            console.log(`ReadNovelFull: Fetching chapters from AJAX: ${ajaxURL}`);
+            
+            const chapterHTML = await fetch(ajaxURL);
+            console.log(`ReadNovelFull: AJAX response length: ${chapterHTML ? chapterHTML.length : 0}`);
+            
+            if (!chapterHTML || chapterHTML.length < 100) {
+                console.log(`ReadNovelFull: AJAX failed, falling back to HTML parsing`);
+                return this.parseChapterListFromHTML(novelURL);
+            }
+            
+            // Parse the AJAX response
+            const chapters = [];
+            
+            // The AJAX response contains chapter links in various formats
             const chapterSelectors = [
-                '.list-chapter li a',
-                '#tab-chapters .list-chapter li a',
-                '.panel-body .list-chapter li a',
-                'ul.list-chapter li a'
+                'a[href*="/chapter-"]',
+                'a[href*="/ch-"]',
+                'option[value*="/chapter-"]',
+                'option[value*="/ch-"]'
             ];
             
             for (const selector of chapterSelectors) {
-                console.log(`ReadNovelFull: Trying chapter selector: ${selector}`);
-                const chapterElements = parseHTML(html, selector);
+                const chapterElements = parseHTML(chapterHTML, selector);
                 
                 if (chapterElements && chapterElements.length > 0) {
-                    console.log(`ReadNovelFull: ✅ Found ${chapterElements.length} chapters with selector: ${selector}`);
-                    return this.processChapterElements(chapterElements, novelURL);
-                }
-            }
-            
-            // If no chapters found in the main page, look for "READ NOW" button to get first chapter
-            console.log(`ReadNovelFull: No chapter list found, looking for first chapter...`);
-            
-            const readNowSelectors = [
-                '.btn-read-now',
-                'a[href*="/chapter-"]',
-                'a:contains("READ NOW")'
-            ];
-            
-            let firstChapterURL = null;
-            
-            for (const selector of readNowSelectors) {
-                const elements = parseHTML(html, selector);
-                if (elements && elements.length > 0 && elements[0].href) {
-                    firstChapterURL = this.resolveURL(elements[0].href);
-                    console.log(`ReadNovelFull: Found first chapter URL: ${firstChapterURL}`);
-                    break;
-                }
-            }
-            
-            // If we found a first chapter, try to get the chapter list from there
-            if (firstChapterURL) {
-                console.log(`ReadNovelFull: Fetching chapter list from first chapter page...`);
-                try {
-                    const chapterPageHTML = await fetch(firstChapterURL);
-                    const chaptersFromChapterPage = await this.parseChapterListFromChapterPage(chapterPageHTML, novelURL, firstChapterURL);
-                    if (chaptersFromChapterPage.length > 0) {
-                        return chaptersFromChapterPage;
-                    }
-                } catch (error) {
-                    console.log(`ReadNovelFull: Error fetching chapter page: ${error}`);
-                }
-            }
-            
-            console.log(`ReadNovelFull: ❌ No chapters found with any method`);
-            return [];
-            
-        } catch (error) {
-            console.log(`ReadNovelFull: Error parsing chapter list: ${error}`);
-            return [];
-        }
-    }
-
-    async parseChapterListFromChapterPage(html, novelURL, currentChapterURL) {
-        try {
-            console.log(`ReadNovelFull: Parsing chapter list from chapter page`);
-            
-            // Look for chapter navigation or chapter list on the chapter page
-            const chapterNavSelectors = [
-                '.chapter-nav select option',
-                '.chapter-list a',
-                'select[name="chapter"] option',
-                '#chapter-list a'
-            ];
-            
-            for (const selector of chapterNavSelectors) {
-                console.log(`ReadNovelFull: Trying chapter nav selector: ${selector}`);
-                const elements = parseHTML(html, selector);
-                
-                if (elements && elements.length > 0) {
-                    console.log(`ReadNovelFull: ✅ Found ${elements.length} chapters in navigation`);
+                    console.log(`ReadNovelFull: ✅ Found ${chapterElements.length} chapters with AJAX selector: ${selector}`);
                     
-                    const chapters = [];
-                    for (let i = 0; i < elements.length; i++) {
-                        const element = elements[i];
-                        let chapterURL = element.href || element.value;
-                        let chapterTitle = element.text || `Chapter ${i + 1}`;
+                    for (let i = 0; i < chapterElements.length; i++) {
+                        const element = chapterElements[i];
                         
-                        if (!chapterURL && element.value) {
-                            // For select options, the value might be a relative URL
-                            chapterURL = this.resolveURL(element.value);
-                        }
+                        let chapterURL = element.href || element.value;
+                        let chapterTitle = element.text || element.textContent || `Chapter ${i + 1}`;
                         
                         if (!chapterURL) continue;
                         
@@ -409,161 +302,98 @@ class ReadNovelFullPlugin extends BasePlugin {
                         chapters.push(chapter);
                     }
                     
-                    return chapters;
-                }
-            }
-            
-            // If no chapter navigation found, try to generate chapters based on current URL pattern
-            console.log(`ReadNovelFull: No chapter navigation found, generating from current URL pattern`);
-            return this.generateChapterListFromCurrentChapter(currentChapterURL, novelURL);
-            
-        } catch (error) {
-            console.log(`ReadNovelFull: Error parsing chapter page: ${error}`);
-            return [];
-        }
-    }
-
-    generateChapterListFromCurrentChapter(currentChapterURL, novelURL) {
-        try {
-            console.log(`ReadNovelFull: Generating chapters from current URL: ${currentChapterURL}`);
-            
-            // Extract chapter number from current URL
-            const chapterMatch = currentChapterURL.match(/chapter-(\d+)/i);
-            if (!chapterMatch) {
-                console.log(`ReadNovelFull: Could not extract chapter number from URL`);
-                return [];
-            }
-            
-            const currentChapterNum = parseInt(chapterMatch[1]);
-            console.log(`ReadNovelFull: Current chapter number: ${currentChapterNum}`);
-            
-            // Generate URLs for a reasonable range of chapters
-            const chapters = [];
-            const baseURL = currentChapterURL.replace(/chapter-\d+[^\/]*\.html/, '');
-            
-            // Generate chapters starting from 1 up to current + 50
-            const maxChapters = Math.max(currentChapterNum + 50, 100);
-            
-            for (let i = 1; i <= maxChapters; i++) {
-                // Try to match the URL pattern of the current chapter
-                let chapterURL;
-                if (currentChapterURL.includes('chapter-' + currentChapterNum + '-')) {
-                    // Has chapter title in URL
-                    const titlePart = currentChapterURL.split('chapter-' + currentChapterNum + '-')[1];
-                    const baseTitlePart = titlePart.split('.html')[0];
-                    chapterURL = `${baseURL}chapter-${i}-${this.generateChapterSlug(i)}.html`;
-                } else {
-                    // Simple chapter number
-                    chapterURL = `${baseURL}chapter-${i}.html`;
-                }
-                
-                const chapter = {
-                    id: `readnovelfull_chapter_${Date.now()}_${i}`,
-                    title: `Chapter ${i}`,
-                    novelId: novelURL,
-                    chapterNumber: i,
-                    url: chapterURL,
-                    content: null,
-                    isDownloaded: false
-                };
-                
-                chapters.push(chapter);
-            }
-            
-            console.log(`ReadNovelFull: ✅ Generated ${chapters.length} chapters`);
-            return chapters;
-            
-        } catch (error) {
-            console.log(`ReadNovelFull: Error generating chapters: ${error}`);
-            return [];
-        }
-    }
-
-    generateChapterSlug(chapterNumber) {
-        // Generate a reasonable slug for the chapter
-        const slugs = [
-            'class-awakening', 'cultivation', 'successful-awakening', 'meeting-the-principal', 
-            'registering-as-an-awakener-1', 'registering-as-an-awakener-2', 'information-about-awakeners-and-the-land-of-origin-1',
-            'information-about-awakeners-and-the-land-of-origin-2', 'information-about-awakeners-and-the-land-of-origin-3',
-            'preparations', 'land-of-origin', 'reality-different-from-expectation', 'first-kill', 'new-skill',
-            'killing-more-slimes', 'increasing-strength', 'spirit-crystal', 'suspicions', 'clearing-the-space-1',
-            'clearing-the-space-2'
-        ];
-        
-        if (chapterNumber <= slugs.length) {
-            return slugs[chapterNumber - 1];
-        }
-        
-        return `chapter-${chapterNumber}`;
-    }
-
-    processChapterElements(chapterElements, novelURL) {
-        const chapters = [];
-        
-        for (let i = 0; i < chapterElements.length; i++) {
-            try {
-                const element = chapterElements[i];
-                
-                // Get chapter title from the nested span with class "nchr-text" or from the text
-                let chapterTitle = '';
-                const spanElements = parseHTML(element.html, '.nchr-text');
-                if (spanElements && spanElements.length > 0) {
-                    chapterTitle = spanElements[0].text.trim();
-                } else {
-                    chapterTitle = element.text ? element.text.trim() : `Chapter ${i + 1}`;
-                }
-                
-                const chapterURL = this.resolveURL(element.href);
-                
-                if (!chapterURL) {
-                    console.log(`ReadNovelFull: Skipping chapter ${i}: no URL`);
-                    continue;
-                }
-                
-                // Extract chapter number from title or URL
-                let chapterNumber = i + 1;
-                
-                const titleNumberMatch = chapterTitle.match(/Chapter\s+(\d+)/i);
-                if (titleNumberMatch) {
-                    chapterNumber = parseInt(titleNumberMatch[1]);
-                } else {
-                    const urlNumberMatch = chapterURL.match(/chapter[-_]?(\d+)/i);
-                    if (urlNumberMatch) {
-                        chapterNumber = parseInt(urlNumberMatch[1]);
+                    if (chapters.length > 0) {
+                        console.log(`ReadNovelFull: ✅ Successfully parsed ${chapters.length} chapters via AJAX`);
+                        return chapters;
                     }
                 }
-                
-                const chapter = {
-                    id: `readnovelfull_chapter_${Date.now()}_${i}_${chapterNumber}`,
-                    title: chapterTitle,
-                    novelId: novelURL,
-                    chapterNumber: chapterNumber,
-                    url: chapterURL,
-                    content: null,
-                    isDownloaded: false
-                };
-                
-                chapters.push(chapter);
-                
-                if (i < 5) {
-                    console.log(`ReadNovelFull: Chapter ${i + 1}: "${chapterTitle}" -> ${chapterURL}`);
-                }
-                
-            } catch (error) {
-                console.log(`ReadNovelFull: Error processing chapter element ${i}: ${error}`);
             }
+            
+            console.log(`ReadNovelFull: AJAX parsing failed, falling back to HTML parsing`);
+            return this.parseChapterListFromHTML(novelURL);
+            
+        } catch (error) {
+            console.log(`ReadNovelFull: AJAX chapter fetch error: ${error}`);
+            return this.parseChapterListFromHTML(novelURL);
         }
-        
-        console.log(`ReadNovelFull: ✅ Processed ${chapters.length} chapter elements`);
-        return chapters;
+    }
+
+    // Fallback method for when AJAX fails
+    async parseChapterListFromHTML(novelURL) {
+        try {
+            console.log(`ReadNovelFull: Parsing chapters from main novel page HTML`);
+            const html = await fetch(novelURL);
+            
+            // Look for chapters directly in the HTML
+            const chapterSelectors = [
+                '.list-chapter li a',
+                '#tab-chapters .list-chapter li a',
+                '.panel-body .list-chapter li a',
+                'ul.list-chapter li a'
+            ];
+            
+            for (const selector of chapterSelectors) {
+                const chapterElements = parseHTML(html, selector);
+                
+                if (chapterElements && chapterElements.length > 0) {
+                    console.log(`ReadNovelFull: ✅ Found ${chapterElements.length} chapters with HTML selector: ${selector}`);
+                    
+                    const chapters = [];
+                    for (let i = 0; i < chapterElements.length; i++) {
+                        const element = chapterElements[i];
+                        
+                        // Get chapter title from nested span or direct text
+                        let chapterTitle = '';
+                        const spanElements = parseHTML(element.html, '.nchr-text');
+                        if (spanElements && spanElements.length > 0) {
+                            chapterTitle = spanElements[0].text.trim();
+                        } else {
+                            chapterTitle = element.text ? element.text.trim() : `Chapter ${i + 1}`;
+                        }
+                        
+                        const chapterURL = this.resolveURL(element.href);
+                        if (!chapterURL) continue;
+                        
+                        // Extract chapter number
+                        let chapterNumber = i + 1;
+                        const numberMatch = chapterTitle.match(/Chapter\s+(\d+)/i) || chapterURL.match(/chapter-(\d+)/i);
+                        if (numberMatch) {
+                            chapterNumber = parseInt(numberMatch[1]);
+                        }
+                        
+                        const chapter = {
+                            id: `readnovelfull_chapter_${Date.now()}_${i}_${chapterNumber}`,
+                            title: chapterTitle,
+                            novelId: novelURL,
+                            chapterNumber: chapterNumber,
+                            url: chapterURL,
+                            content: null,
+                            isDownloaded: false
+                        };
+                        
+                        chapters.push(chapter);
+                    }
+                    
+                    if (chapters.length > 0) {
+                        console.log(`ReadNovelFull: ✅ Successfully parsed ${chapters.length} chapters from HTML`);
+                        return chapters;
+                    }
+                }
+            }
+            
+            console.log(`ReadNovelFull: ❌ No chapters found in HTML`);
+            return [];
+            
+        } catch (error) {
+            console.log(`ReadNovelFull: Error parsing HTML chapters: ${error}`);
+            return [];
+        }
     }
 
     async fetchChapterContent(chapterURL) {
         try {
             console.log(`ReadNovelFull: Fetching chapter content from: ${chapterURL}`);
             const html = await fetch(chapterURL);
-            
-            console.log(`ReadNovelFull: Chapter HTML length: ${html ? html.length : 0} characters`);
             
             // ReadNovelFull chapter content selectors
             const contentSelectors = [
@@ -576,7 +406,6 @@ class ReadNovelFullPlugin extends BasePlugin {
             ];
             
             for (const selector of contentSelectors) {
-                console.log(`ReadNovelFull: Trying content selector: ${selector}`);
                 const contentElements = parseHTML(html, selector);
                 
                 if (contentElements && contentElements.length > 0) {
@@ -584,10 +413,7 @@ class ReadNovelFullPlugin extends BasePlugin {
                     
                     if (content && content.length > 100) {
                         console.log(`ReadNovelFull: ✅ Found content with ${selector}, length: ${content.length}`);
-                        
-                        // Process HTML content to preserve paragraphs
                         content = this.processChapterContent(content);
-                        console.log(`ReadNovelFull: ✅ Processed content, final length: ${content.length}`);
                         return content;
                     }
                 }
@@ -602,21 +428,17 @@ class ReadNovelFullPlugin extends BasePlugin {
         }
     }
 
-    // Process chapter content to preserve paragraph structure
     processChapterContent(htmlContent) {
         if (!htmlContent) return '';
         
-        console.log(`ReadNovelFull: Processing chapter content, input length: ${htmlContent.length}`);
-        
-        // Remove unwanted elements but preserve structure
+        // Clean and format the content
         let processedContent = htmlContent
-            // Remove ads and unwanted divs
+            // Remove ads and scripts
             .replace(/<div[^>]*class="ads[^"]*"[^>]*>.*?<\/div>/gi, '')
-            .replace(/<div[^>]*class="advertisement[^"]*"[^>]*>.*?<\/div>/gi, '')
             .replace(/<script[^>]*>.*?<\/script>/gi, '')
             .replace(/<style[^>]*>.*?<\/style>/gi, '')
             
-            // Convert HTML paragraphs to double line breaks
+            // Convert paragraphs
             .replace(/<\/p>/gi, '</p>\n\n')
             .replace(/<p[^>]*>/gi, '')
             .replace(/<\/p>/gi, '')
@@ -624,15 +446,13 @@ class ReadNovelFullPlugin extends BasePlugin {
             // Convert line breaks
             .replace(/<br\s*\/?>/gi, '\n')
             
-            // Handle strong/bold tags
+            // Handle formatting
             .replace(/<strong[^>]*>(.*?)<\/strong>/gi, '**$1**')
             .replace(/<b[^>]*>(.*?)<\/b>/gi, '**$1**')
-            
-            // Handle emphasis/italic tags
             .replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*')
             .replace(/<i[^>]*>(.*?)<\/i>/gi, '*$1*')
             
-            // Remove other HTML tags
+            // Remove remaining HTML tags
             .replace(/<[^>]+>/g, '')
             
             // Clean up entities
@@ -642,15 +462,15 @@ class ReadNovelFullPlugin extends BasePlugin {
             .replace(/&gt;/gi, '>')
             .replace(/&quot;/gi, '"')
             
-            // Clean up multiple line breaks
+            // Clean up spacing
             .replace(/\n\s*\n\s*\n/g, '\n\n')
             .trim();
         
-        // Ensure each paragraph is separated by double line breaks
+        // Ensure paragraphs are properly separated
         const paragraphs = processedContent.split('\n\n').filter(p => p.trim().length > 0);
         const result = paragraphs.join('\n\n');
         
-        console.log(`ReadNovelFull: Processed into ${paragraphs.length} paragraphs, final length: ${result.length}`);
+        console.log(`ReadNovelFull: Processed into ${paragraphs.length} paragraphs`);
         return result;
     }
 }
