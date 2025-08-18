@@ -1,7 +1,7 @@
 // @id novelfull
 // @name NovelFull
-// @version 1.0.4
-// @description Read novels from NovelFull.net with fixed cover image handling and complete chapter loading
+// @version 1.0.5
+// @description Read novels from NovelFull.net with optimized pagination and deduplication
 // @author khairil4565
 // @website https://novelfull.net
 
@@ -153,7 +153,7 @@ class NovelFullPlugin extends BasePlugin {
             console.log(`Fetching novel details from: ${novelURL}`);
             const html = await fetch(novelURL);
             
-            // Parse basic novel info (same as before)
+            // Parse basic novel info
             const titleElements = parseHTML(html, '.books .desc h3.title, h3.title');
             const title = (titleElements && titleElements.length > 0 && titleElements[0].text) ? 
                 titleElements[0].text.trim() : 'Unknown Title';
@@ -179,8 +179,8 @@ class NovelFullPlugin extends BasePlugin {
                 }
             }
             
-            // NEW: Fast parallel chapter fetching
-            const chapters = await this.fetchAllChaptersParallel(html, novelURL);
+            // Optimized chapter fetching with deduplication
+            const chapters = await this.fetchAllChaptersOptimized(html, novelURL);
             
             const novel = {
                 id: `novelfull_${Date.now()}`,
@@ -211,13 +211,21 @@ class NovelFullPlugin extends BasePlugin {
         }
     }
 
-    async fetchAllChaptersParallel(firstPageHtml, novelURL) {
+    async fetchAllChaptersOptimized(firstPageHtml, novelURL) {
         let allChapters = [];
+        const seenUrls = new Set(); // Global deduplication
         
         try {
             // Get chapters from first page
-            const firstPageChapters = this.parseChapterList(firstPageHtml, novelURL);
-            allChapters = allChapters.concat(firstPageChapters);
+            const firstPageChapters = this.parseChapterListOptimized(firstPageHtml, novelURL);
+            
+            // Add first page chapters with deduplication
+            for (const chapter of firstPageChapters) {
+                if (!seenUrls.has(chapter.url.toLowerCase())) {
+                    seenUrls.add(chapter.url.toLowerCase());
+                    allChapters.push(chapter);
+                }
+            }
             
             // Determine total pages
             const totalPages = this.getTotalPages(firstPageHtml);
@@ -236,11 +244,11 @@ class NovelFullPlugin extends BasePlugin {
             
             console.log(`Will fetch ${pagesToFetch.length} additional pages in parallel`);
             
-            // Fetch pages in parallel batches
-            const allPageChapters = await this.fetchPagesInBatches(pagesToFetch, novelURL);
+            // Fetch pages in parallel batches with deduplication
+            const additionalChapters = await this.fetchPagesInBatchesOptimized(pagesToFetch, novelURL, seenUrls);
             
             // Combine all chapters
-            allChapters = allChapters.concat(allPageChapters);
+            allChapters = allChapters.concat(additionalChapters);
             
             // Sort chapters by chapter number
             allChapters.sort((a, b) => a.chapterNumber - b.chapterNumber);
@@ -248,13 +256,13 @@ class NovelFullPlugin extends BasePlugin {
             console.log(`Successfully fetched ${allChapters.length} total chapters from ${totalPages} pages`);
             
         } catch (error) {
-            console.log(`Error in fetchAllChaptersParallel: ${error}`);
+            console.log(`Error in fetchAllChaptersOptimized: ${error}`);
         }
         
         return allChapters;
     }
 
-    async fetchPagesInBatches(pages, novelURL) {
+    async fetchPagesInBatchesOptimized(pages, novelURL, seenUrls) {
         const allChapters = [];
         const batchSize = this.maxConcurrentRequests;
         
@@ -269,14 +277,19 @@ class NovelFullPlugin extends BasePlugin {
                 // Wait for all pages in this batch to complete
                 const batchResults = await Promise.all(batchPromises);
                 
-                // Flatten and add to all chapters
+                // Add chapters with deduplication
                 for (const pageChapters of batchResults) {
                     if (pageChapters && pageChapters.length > 0) {
-                        allChapters.push(...pageChapters);
+                        for (const chapter of pageChapters) {
+                            if (!seenUrls.has(chapter.url.toLowerCase())) {
+                                seenUrls.add(chapter.url.toLowerCase());
+                                allChapters.push(chapter);
+                            }
+                        }
                     }
                 }
                 
-                console.log(`Batch completed. Total chapters so far: ${allChapters.length}`);
+                console.log(`Batch completed. Total unique chapters so far: ${allChapters.length + Array.from(seenUrls).length - allChapters.length} (${allChapters.length} new)`);
                 
             } catch (error) {
                 console.log(`Error in batch: ${error}`);
@@ -291,7 +304,7 @@ class NovelFullPlugin extends BasePlugin {
         try {
             const pageURL = `${novelURL}?page=${pageNum}`;
             const pageHtml = await fetch(pageURL);
-            const chapters = this.parseChapterList(pageHtml, novelURL);
+            const chapters = this.parseChapterListOptimized(pageHtml, novelURL);
             
             console.log(`Page ${pageNum}: found ${chapters.length} chapters`);
             return chapters;
@@ -316,6 +329,7 @@ class NovelFullPlugin extends BasePlugin {
                 }
             }
         }
+        
         // Alternative method
         const pageNumberElements = parseHTML(html, '.pagination a[data-page]');
         let maxPage = 1;
@@ -335,148 +349,13 @@ class NovelFullPlugin extends BasePlugin {
         return maxPage;
     }
     
-    async parseAllChapters(firstPageHtml, novelURL) {
-        let allChapters = [];
-        
-        try {
-            // First, get chapters from the current page
-            const firstPageChapters = this.parseChapterList(firstPageHtml, novelURL);
-            allChapters = allChapters.concat(firstPageChapters);
-            
-            // Check for pagination by looking for pagination links
-            const paginationElements = parseHTML(firstPageHtml, '.pagination .last a');
-            let totalPages = 1;
-            
-            console.log(`DEBUG: Found ${paginationElements ? paginationElements.length : 0} pagination elements`);
-            
-            // Try to find the last page number from pagination
-            if (paginationElements && paginationElements.length > 0) {
-                for (const element of paginationElements) {
-                    console.log(`DEBUG: Checking pagination element: text="${element.text}", href="${element.href}"`);
-                    
-                    if (element.href && element.href.includes('page=')) {
-                        // Extract page number from Last link
-                        const lastPageMatch = element.href.match(/page=(\d+)/);
-                        if (lastPageMatch) {
-                            totalPages = parseInt(lastPageMatch[1]);
-                            console.log(`DEBUG: Found total pages from Last link: ${totalPages}`);
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            // Alternative: look for page links with numbers if Last link method failed
-            if (totalPages === 1) {
-                const pageNumberElements = parseHTML(firstPageHtml, '.pagination a[data-page]');
-                let maxPage = 1;
-                
-                console.log(`DEBUG: Checking ${pageNumberElements ? pageNumberElements.length : 0} page number elements`);
-                
-                if (pageNumberElements && pageNumberElements.length > 0) {
-                    for (const element of pageNumberElements) {
-                        const dataPage = element['data-page'];
-                        if (dataPage) {
-                            const pageNum = parseInt(dataPage) + 1; // data-page is 0-indexed
-                            console.log(`DEBUG: Found page element with data-page="${dataPage}", pageNum=${pageNum}`);
-                            if (pageNum > maxPage) {
-                                maxPage = pageNum;
-                            }
-                        }
-                    }
-                    totalPages = maxPage;
-                    console.log(`DEBUG: Total pages from data-page method: ${totalPages}`);
-                }
-            }
-            
-            console.log(`Detected ${totalPages} total pages of chapters`);
-            
-            // If there's only 1 page, return what we have
-            if (totalPages <= 1) {
-                console.log(`Single page novel - found ${allChapters.length} chapters`);
-                return allChapters;
-            }
-            
-            // For safety, limit to reasonable number of pages (but allow override)
-            const maxPagesToFetch = totalPages; // Limit to 100 pages max for safety
-            
-            console.log(`Will fetch ${maxPagesToFetch} pages of chapters (total available: ${totalPages})`);
-            
-            // Process pages in batches to avoid overwhelming the server
-            const batchSize = 5;
-            
-            for (let page = 2; page <= maxPagesToFetch; page++) {
-                try {
-                    console.log(`Fetching chapter page ${page}/${maxPagesToFetch}`);
-                    
-                    // Construct URL for the page
-                    const pageURL = `${novelURL}?page=${page}`;
-                    const pageHtml = await fetch(pageURL);
-                    
-                    // Parse chapters from this page
-                    const pageChapters = this.parseChapterList(pageHtml, novelURL);
-                    
-                    if (pageChapters.length === 0) {
-                        console.log(`Page ${page} has no chapters, stopping pagination`);
-                        break;
-                    }
-                    
-                    allChapters = allChapters.concat(pageChapters);
-                    
-                    console.log(`Page ${page}: found ${pageChapters.length} chapters (total: ${allChapters.length})`);
-                    
-                    // Log progress every 10 pages
-                    if (page % 10 === 0) {
-                        console.log(`Progress: ${page}/${maxPagesToFetch} pages completed (${allChapters.length} chapters loaded)`);
-                    }
-                    
-                    // Add a small delay between batch requests to be respectful to the server
-                    if (page % batchSize === 0) {
-                        console.log(`Batch completed, taking a brief pause...`);
-                        // Instead of setTimeout, we'll use a Promise-based delay
-                        await this.delay(500); // 500ms delay
-                    }
-                    
-                } catch (pageError) {
-                    console.log(`Error fetching page ${page}: ${pageError}`);
-                    // Don't break on error, try next page
-                    continue;
-                }
-            }
-            
-            // Sort chapters by chapter number to ensure proper order
-            allChapters.sort((a, b) => a.chapterNumber - b.chapterNumber);
-            
-            console.log(`Successfully fetched ${allChapters.length} total chapters from ${Math.min(maxPagesToFetch, totalPages)} pages`);
-            
-            // If we hit the safety limit, log a warning
-            if (totalPages > maxPagesToFetch) {
-                console.log(`WARNING: Novel has ${totalPages} pages but only fetched ${maxPagesToFetch} for safety. Increase maxPagesToFetch if needed.`);
-            }
-            
-        } catch (error) {
-            console.log(`Error in parseAllChapters: ${error}`);
-        }
-        
-        return allChapters;
-    }
-
-    // Promise-based delay function (replacement for setTimeout)
-    async delay(ms) {
-        return new Promise(resolve => {
-            // Use a simple counter-based delay since setTimeout isn't available
-            const start = Date.now();
-            while (Date.now() - start < ms) {
-                // Busy wait for the specified time
-                // This is not ideal but works in JavaScriptCore environment
-            }
-            resolve();
-        });
-    }
-
-    parseChapterList(html, novelURL) {
+    parseChapterListOptimized(html, novelURL) {
         const chapters = [];
-        const chapterElements = parseHTML(html, '#list-chapter .row a, .chapter-list a, .list-chapter a');
+        
+        // Optimized selector to get exactly chapter links like LightReader (should get ~50 per page)
+        const chapterElements = parseHTML(html, 'ul li a[href*="chapter-"]:not([href*="edit"]):not([href*="report"]):not([class*="btn"]), li a[href*="chapter-"]:not([href*="edit"]):not([class*="btn"])');
+        
+        console.log(`Parsing ${chapterElements.length} chapter elements from page`);
         
         for (let i = 0; i < chapterElements.length; i++) {
             const element = chapterElements[i];
@@ -494,18 +373,19 @@ class NovelFullPlugin extends BasePlugin {
                 const titleNumberMatch = chapterTitle.match(/Chapter\s+(\d+)/i);
                 if (titleNumberMatch) {
                     chapterNumber = parseInt(titleNumberMatch[1]);
-                }
-                
-                // If not found in title, try URL
-                if (!titleNumberMatch) {
+                } else {
+                    // If not found in title, try URL
                     const urlNumberMatch = chapterURL.match(/chapter[_-](\d+)/i);
                     if (urlNumberMatch) {
                         chapterNumber = parseInt(urlNumberMatch[1]);
                     }
                 }
                 
+                // Create consistent ID based on chapter number and URL
+                const urlSlug = chapterURL.split('/').pop() || chapterNumber;
+                
                 const chapter = {
-                    id: `chapter_${Date.now()}_${i}_${chapterNumber}`,
+                    id: `chapter_${chapterNumber}_${urlSlug}`,
                     title: chapterTitle,
                     novelId: novelURL,
                     chapterNumber: chapterNumber,
