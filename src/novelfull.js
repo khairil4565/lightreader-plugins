@@ -1,7 +1,7 @@
 // @id novelfull
 // @name NovelFull
-// @version 1.2.0
-// @description Read novels from NovelFull.net - SMART overlap detection: skip duplicates, get exactly 50 new chapters per page
+// @version 1.3.0
+// @description Read novels from NovelFull.net - BATCH concurrent fetching: fetch 10 pages at once for 500 chapters
 // @author khairil4565
 // @website https://novelfull.net
 
@@ -9,7 +9,8 @@ class NovelFullPlugin extends BasePlugin {
     constructor(config) {
         super(config);
         this.baseURL = 'https://novelfull.net';
-        this.maxConcurrentRequests = 6;
+        this.maxConcurrentRequests = 10; // Increased for batch fetching
+        this.batchSize = 10; // Number of pages to fetch concurrently
     }
 
     async searchNovels(query) {
@@ -83,7 +84,7 @@ class NovelFullPlugin extends BasePlugin {
                         
                         if (authorText && authorText.trim()) {
                             author = authorText.trim()
-                                .replace(/^\s*📝\s*/, '')
+                                .replace(/^\s*📖\s*/, '')
                                 .replace(/\s+/g, ' ')
                                 .trim();
                             
@@ -114,7 +115,7 @@ class NovelFullPlugin extends BasePlugin {
                         sourcePlugin: this.id,
                         novelURL: novelURL
                     };
-                    
+            
                     novels.push(novel);
                     
                 } catch (error) {
@@ -168,8 +169,9 @@ class NovelFullPlugin extends BasePlugin {
                 }
             }
             
-            console.log('Starting SMART chapter fetch for: ' + title);
-            const chapters = await this.fetchAllChaptersSmart(html, novelURL);
+            console.log('Starting BATCH chapter fetch for: ' + title);
+            // Use the new batch fetching method instead of the old sequential one
+            const chapters = await this.fetchAllChaptersBatch(html, novelURL);
             
             const novel = {
                 id: 'novelfull_' + Date.now(),
@@ -198,13 +200,13 @@ class NovelFullPlugin extends BasePlugin {
         }
     }
 
-    async fetchAllChaptersSmart(firstPageHtml, novelURL) {
+    async fetchAllChaptersBatch(firstPageHtml, novelURL) {
         let allChapters = [];
-        const seenChapterUrls = new Set();     // Track URLs to prevent duplicates
-        const seenChapterNumbers = new Set();  // Track chapter numbers for additional safety
+        const seenChapterUrls = new Set();
+        const seenChapterNumbers = new Set();
         
         try {
-            console.log('Starting SMART chapter fetching with overlap detection...');
+            console.log('Starting BATCH chapter fetching (concurrent pages)...');
             
             // Parse first page chapters
             const firstPageChapters = this.parseChapterListSmart(firstPageHtml, novelURL, seenChapterUrls, seenChapterNumbers);
@@ -223,40 +225,113 @@ class NovelFullPlugin extends BasePlugin {
                 return this.sortChaptersByNumber(allChapters);
             }
             
-            // Fetch remaining pages with smart overlap detection
-            for (let page = 2; page <= totalPages; page++) {
-                try {
-                    const pageURL = novelURL + '?page=' + page;
-                    console.log('Fetching page ' + page + ': ' + pageURL);
-                    
-                    const pageHtml = await fetch(pageURL);
-                    const pageChapters = this.parseChapterListSmart(pageHtml, novelURL, seenChapterUrls, seenChapterNumbers);
-                    
-                    console.log('Page ' + page + ': Found ' + pageChapters.length + ' NEW chapters (after overlap detection)');
-                    
-                    // Add new chapters
-                    allChapters = allChapters.concat(pageChapters);
-                    console.log('After page ' + page + ': ' + allChapters.length + ' total chapters');
-                    
-                    // If page returned no NEW chapters, likely reached the end or all overlaps
-                    if (pageChapters.length === 0) {
-                        console.log('Page ' + page + ' returned no new chapters - likely reached end or all overlaps');
-                        break;
-                    }
-                    
-                } catch (error) {
-                    console.log('Error fetching page ' + page + ': ' + error);
-                    // Continue with next page
+            // Calculate how many pages to fetch concurrently
+            const pagesToFetch = Math.min(totalPages - 1, this.batchSize); // -1 because we already have page 1
+            console.log('Will fetch ' + pagesToFetch + ' additional pages concurrently...');
+            
+            // Create array of page numbers to fetch (starting from page 2)
+            const pageNumbers = [];
+            for (let page = 2; page <= Math.min(totalPages, this.batchSize + 1); page++) {
+                pageNumbers.push(page);
+            }
+            
+            // Fetch all pages concurrently
+            const batchResults = await this.fetchPagesConcurrently(novelURL, pageNumbers, seenChapterUrls, seenChapterNumbers);
+            
+            // Process results and combine chapters
+            let totalNewChapters = 0;
+            for (const result of batchResults) {
+                if (result.success && result.chapters.length > 0) {
+                    allChapters = allChapters.concat(result.chapters);
+                    totalNewChapters += result.chapters.length;
+                    console.log('Page ' + result.page + ': Added ' + result.chapters.length + ' NEW chapters');
+                } else if (!result.success) {
+                    console.log('Page ' + result.page + ': Failed to fetch - ' + result.error);
                 }
             }
             
+            console.log('BATCH fetch completed! Added ' + totalNewChapters + ' chapters from ' + pageNumbers.length + ' pages');
+            
+            // If we want even more pages, we can do another batch
+            if (totalPages > this.batchSize + 1) {
+                console.log('Novel has more pages (' + totalPages + ' total). Consider increasing batchSize or implementing progressive loading.');
+            }
+            
             const sortedChapters = this.sortChaptersByNumber(allChapters);
-            console.log('SMART fetch finished! Total unique chapters: ' + sortedChapters.length);
+            console.log('BATCH fetch finished! Total unique chapters: ' + sortedChapters.length);
             return sortedChapters;
             
         } catch (error) {
-            console.log('Error in fetchAllChaptersSmart: ' + error);
+            console.log('Error in fetchAllChaptersBatch: ' + error);
             return this.sortChaptersByNumber(allChapters);
+        }
+    }
+
+    async fetchPagesConcurrently(novelURL, pageNumbers, seenChapterUrls, seenChapterNumbers) {
+        console.log('Fetching ' + pageNumbers.length + ' pages concurrently...');
+        
+        // Create promises for all page fetches
+        const fetchPromises = pageNumbers.map(pageNumber => 
+            this.fetchSinglePageSafe(novelURL, pageNumber, seenChapterUrls, seenChapterNumbers)
+        );
+        
+        // Execute all requests concurrently and wait for all to complete
+        const results = await Promise.allSettled(fetchPromises);
+        
+        // Process results
+        const processedResults = results.map((result, index) => {
+            const pageNumber = pageNumbers[index];
+            
+            if (result.status === 'fulfilled') {
+                return {
+                    page: pageNumber,
+                    success: true,
+                    chapters: result.value || [],
+                    error: null
+                };
+            } else {
+                return {
+                    page: pageNumber,
+                    success: false,
+                    chapters: [],
+                    error: result.reason ? result.reason.toString() : 'Unknown error'
+                };
+            }
+        });
+        
+        const successCount = processedResults.filter(r => r.success).length;
+        const failCount = processedResults.filter(r => !r.success).length;
+        console.log('Concurrent fetch results: ' + successCount + ' successful, ' + failCount + ' failed');
+        
+        return processedResults;
+    }
+
+    async fetchSinglePageSafe(novelURL, pageNumber, seenChapterUrls, seenChapterNumbers) {
+        try {
+            const pageURL = novelURL + '?page=' + pageNumber;
+            console.log('Fetching page ' + pageNumber + ': ' + pageURL);
+            
+            const pageHtml = await fetch(pageURL);
+            
+            // Create local copies of the Sets to avoid race conditions
+            const localSeenUrls = new Set(seenChapterUrls);
+            const localSeenNumbers = new Set(seenChapterNumbers);
+            
+            const pageChapters = this.parseChapterListSmart(pageHtml, novelURL, localSeenUrls, localSeenNumbers);
+            
+            // Update the main Sets (this might have race conditions, but parseChapterListSmart handles duplicates)
+            for (const url of localSeenUrls) {
+                seenChapterUrls.add(url);
+            }
+            for (const num of localSeenNumbers) {
+                seenChapterNumbers.add(num);
+            }
+            
+            return pageChapters;
+            
+        } catch (error) {
+            console.log('Error fetching page ' + pageNumber + ': ' + error);
+            throw error;
         }
     }
 
@@ -380,7 +455,7 @@ class NovelFullPlugin extends BasePlugin {
                 
                 newChapters.push(chapter);
                 addedCount++;
-                
+          
                 // Log first few and last few for debugging
                 if (addedCount <= 3 || processedCount >= chapterElements.length - 3) {
                     console.log('SMART: Added NEW chapter ' + chapterNumber + ': ' + chapterTitle);
