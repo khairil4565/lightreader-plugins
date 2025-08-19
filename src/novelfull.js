@@ -1,7 +1,7 @@
 // @id novelfull
 // @name NovelFull
-// @version 1.3.0
-// @description Read novels from NovelFull.net - BATCH concurrent fetching: fetch 10 pages at once for 500 chapters
+// @version 1.3.1
+// @description Read novels from NovelFull.net - BATCH concurrent fetching: fetch 5 pages at once for 250 chapters
 // @author khairil4565
 // @website https://novelfull.net
 
@@ -9,8 +9,8 @@ class NovelFullPlugin extends BasePlugin {
     constructor(config) {
         super(config);
         this.baseURL = 'https://novelfull.net';
-        this.maxConcurrentRequests = 10; // Increased for batch fetching
-        this.batchSize = 10; // Number of pages to fetch concurrently
+        this.maxConcurrentRequests = 5; // Increased for batch fetching
+        this.batchSize = 5; // Number of pages to fetch concurrently
     }
 
     async searchNovels(query) {
